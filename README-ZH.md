@@ -15,8 +15,6 @@
 
 ## 安装
 
-项目版本记录在 [VERSION.txt](VERSION.txt)，Cargo 包版本必须与其一致。
-
 目标系统为 macOS/Linux、arm64/x86_64，需要 `curl`；源码构建需要 **Rust 1.94+**。本次仅在当前 Apple Silicon Mac 上验证，Linux 及旧系统兼容性尚未验证。
 
 在本项目目录执行，无须 Homebrew：

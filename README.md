@@ -15,8 +15,6 @@
 
 ## Install
 
-The project version is recorded in [VERSION.txt](VERSION.txt); Cargo package metadata must match it.
-
 macOS/Linux, arm64/x86_64; `curl` is needed for HTTPS. Build using Rust **1.94+**. This version has been tested on the current Apple Silicon Mac only. Linux and older OS/runtime compatibility remain unverified.
 
 From this local checkout, without Homebrew:
