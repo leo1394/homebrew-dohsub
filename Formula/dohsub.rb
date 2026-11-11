@@ -41,7 +41,7 @@ class Dohsub < Formula
       bin.install Dir["dohsub-*"].first => "dohsub"
     end
     chmod 0755, bin/"dohsub"
-    generate_completions_from_executable(bin/"dohsub", "completion", shell_parameter_format: :arg)
+    generate_completions_from_executable(bin/"dohsub", "completion")
     man1.mkpath
     (man1/"dohsub.1").write Utils.safe_popen_read(bin/"dohsub", "man")
   end
