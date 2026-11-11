@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-labelledby="title desc">
+  <title id="title">dohsub — Subscribe on DoH.</title>
+  <desc id="desc">DoH resolution. A local subscription service. Proxy node management.</desc>
+  <rect width="1280" height="420" fill="#151a18"/>
+  <text x="64" y="64" fill="#a5c8ad" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="15" letter-spacing="2">SUBSCRIBE ON DoH.</text>
+  <g fill="#f5f5ef" fill-rule="evenodd" transform="translate(60 110) scale(1.2)"><path d="M68 0H88V126H68V116C61 124 51 128 39 128C16 128 0 110 0 84C0 58 16 40 39 40C51 40 61 44 68 52Z M20 84C20 100 28 110 42 110C58 110 68 100 68 84C68 68 58 58 42 58C28 58 20 68 20 84Z"/><path transform="translate(102 0)" d="M88 84C88 110 71 128 44 128C17 128 0 110 0 84C0 58 17 40 44 40C71 40 88 58 88 84Z M20 84C20 100 29 110 44 110C59 110 68 100 68 84C68 68 59 58 44 58C29 58 20 68 20 84Z"/><path transform="translate(204 0)" d="M0 0H20V52C27 44 36 40 47 40C70 40 82 55 82 80V126H62V82C62 66 55 58 42 58C28 58 20 69 20 84V126H0Z"/><path transform="translate(303 0)" d="M78 48L70 63C61 58 53 56 42 56C29 56 22 60 22 67C22 73 28 76 44 80C68 85 80 92 80 106C80 122 65 130 42 130C26 130 12 126 0 118L8 102C18 109 30 113 42 113C56 113 62 110 62 104C62 98 56 96 40 92C16 86 4 80 4 65C4 49 19 40 42 40C56 40 68 42 78 48Z"/><path transform="translate(397 0)" d="M0 42H20V88C20 104 27 112 41 112C55 112 62 103 62 88V42H82V88C82 114 67 130 41 130C15 130 0 114 0 88Z"/><path transform="translate(583 0) scale(-1 1)" d="M68 0H88V126H68V116C61 124 51 128 39 128C16 128 0 110 0 84C0 58 16 40 39 40C51 40 61 44 68 52Z M20 84C20 100 28 110 42 110C58 110 68 100 68 84C68 68 58 58 42 58C28 58 20 68 20 84Z"/></g>
+  <path d="M64 322H1216" fill="none" stroke="#46534a"/>
+  <path d="M64 322H168" fill="none" stroke="#a5c8ad" stroke-width="3"/>
+  <g fill="#e1e5df" font-family="-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif" font-size="18">
+    <text x="64" y="368">DoH resolution</text><text x="440" y="368">Local subscriptions</text><text x="816" y="368">Proxy node management</text>
+  </g>
+</svg>

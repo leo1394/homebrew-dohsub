@@ -1,0 +1,130 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH dohsub 1  "dohsub 0.1.1" 
+.SH NAME
+dohsub \- Serve a local QX subscription with automatically updated DoH\-resolved IPv4 addresses.
+.SH SYNOPSIS
+\fBdohsub\fR [\fB\-V\fR|\fB\-\-version\fR] [\fB\-h\fR|\fB\-\-help\fR] [\fIsubcommands\fR]
+.SH DESCRIPTION
+Serve a local QX subscription with automatically updated DoH\-resolved IPv4 addresses.
+.SH OPTIONS
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version and repository (no network)
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.SH SUBCOMMANDS
+.TP
+dohsub\-config(1)
+Save or inspect private cached settings; changes apply on next start/restart
+.TP
+dohsub\-start(1)
+Validate DoH, reserve a loopback port and start the background subscription service
+.TP
+dohsub\-import(1)
+Stage nodes from a private QX text, ss:// or servers JSON file
+.TP
+dohsub\-add(1)
+Import node configuration from the local clipboard
+.TP
+dohsub\-restart(1)
+Stop then start using cached configuration; validates DoH before stopping
+.TP
+dohsub\-stop(1)
+Stop the managed dohsub daemon
+.TP
+dohsub\-list(1)
+List staged nodes and active publication status without passwords
+.TP
+dohsub\-refresh(1)
+Load staged nodes and queue one immediate DNS refresh, bypassing backoff once
+.TP
+dohsub\-remove(1)
+Remove one node by exact tag, with a one\-level backup; reload if running
+.TP
+dohsub\-copy\-resource(1)
+Copy the private QX server_remote subscription line to the clipboard
+.TP
+dohsub\-restore(1)
+Restore the node snapshot from before the latest modification; reload if running
+.TP
+dohsub\-version(1)
+Print exactly two lines: version and repository URL
+.TP
+dohsub\-upgrade(1)
+Check GitHub releases and optionally upgrade the owning installation
+.TP
+dohsub\-completion(1)
+Generate shell completion without reading or writing configuration
+.TP
+dohsub\-man(1)
+Write the man page to stdout without initializing state
+.TP
+dohsub\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH EXTRA
+Examples:
+  dohsub config set \-\-doh https://dns.example.com/dns\-query
+  dohsub import \-\-file ~/Downloads/nodes.txt
+  dohsub start
+  dohsub copy\-resource
+
+macOS and Linux. curl is required for HTTPS. State: ~/.dohsub (private).
+.SH VERSION
+v0.1.1
+.SH DESCRIPTION
+The resident service binds only to 127.0.0.1. It resolves unique node hostnames using
+HTTPS GET with an RFC 8484 DNS wire query, then publishes QX Shadowsocks nodes with
+public IPv4 addresses. It does not route traffic or change system DNS.
+.SH EXAMPLES
+.nf
+chmod 600 ~/Downloads/nodes.txt
+dohsub config set --doh https://dns.example.com/dns-query
+dohsub import --file ~/Downloads/nodes.txt
+dohsub start
+dohsub copy-resource
+dohsub config --list
+dohsub refresh
+dohsub stop
+.fi
+Paste the copied line into QX [server_remote] and refresh in QX.
+Use "dohsub help COMMAND" for options and examples, including nested "config set".
+.SH EXIT STATUS
+0: success or cancelled upgrade. 1: operation failed, including partial import
+(accepted nodes remain saved). 2: command-line syntax error.
+.SH ENVIRONMENT
+DOHSUB_HOME overrides ~/.dohsub for all private state. NO_COLOR disables colored
+import indicators. HOME supplies the default state and installer prefix.
+.SH FILES
+~/.dohsub/config.json: cached DoH URL, port and optional interface.
+.br
+~/.dohsub/nodes.json: staged nodes. nodes.previous.json: one-step backup.
+.br
+~/.dohsub/runtime.json: active snapshot. dns-cache.json: TTL cache and retry state.
+.br
+~/.dohsub/token: subscription access token. control.sock: private local IPC.
+.br
+The directory is mode 700; private files are mode 600. Node input files must also
+be regular files owned by the user with mode 600.
+.SH CAVEATS
+The upgrade command checks stable GitHub releases; --yes authorizes an
+available upgrade.
+The daemon is manually started and does not enable login startup.
+.br
+Successful import validates syntax; publication requires a public IPv4 and does
+not verify the Shadowsocks handshake or reachability of the proxy port.
+.br
+New imports are staged until confirmed (y/yes), imported with -y, or loaded by
+refresh/restart. Default confirmation is no, including EOF and noninteractive use.
+.br
+DNS successes honor TTL (5 seconds to 1 hour). Negative answers retry from 15
+minutes to 6 hours; network failures from 30 seconds to 15 minutes, with jitter.
+Stale resolved addresses can be published for at most 15 minutes after expiry.
+No resolved nodes produces HTTP 503; QX should retain its existing subscription.
+.br
+Default/cached occupied ports increment; an explicit --port collision fails.
+Protect the printed subscription URL and clipboard contents: they authorize
+reading node credentials. The token is not printed by list or diagnostics.
+.SH SEE ALSO
+curl(1), ssh(1)

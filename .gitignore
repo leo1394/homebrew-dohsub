@@ -1,0 +1,4 @@
+/target/
+/.dohsub/
+*.log
+.DS_Store
