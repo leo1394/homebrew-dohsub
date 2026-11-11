@@ -15,7 +15,22 @@
 
 ## 安装
 
-目标系统为 macOS/Linux、arm64/x86_64，需要 `curl`；源码构建需要 **Rust 1.94+**。本次仅在当前 Apple Silicon Mac 上验证，Linux 及旧系统兼容性尚未验证。
+通过 Homebrew 安装稳定版：
+
+```bash
+brew install leo1394/dohsub/dohsub
+```
+
+Homebrew 直接下载对应平台的成品并校验 SHA256。Apple Silicon 下载约 **1.65 MB**，稳定版安装无须编译，也不需要 Rust/LLVM。macOS 使用系统 `curl`；Linux 需要运行时 `curl`。发布文件覆盖 macOS/Linux arm64/x86_64；macOS 构建目标为 11.0+，Linux GNU 构建目标为 glibc 2.35+。已验证当前 Apple Silicon Mac 的原生安装，以及通过 Rosetta 执行 Intel 版本命令；Linux 原生运行和旧系统兼容性尚未验证。
+
+已安装的用户更新：
+
+```bash
+brew update
+brew upgrade leo1394/dohsub/dohsub
+```
+
+源码构建需要 **Rust 1.94+**。
 
 在本项目目录执行，无须 Homebrew：
 
@@ -34,7 +49,7 @@ cargo build --release --locked
 
 `--binary` 信任提供的文件，不能证明下载来源。安装器会先准备二进制、手册和补全，再替换命令；保留 `bin/dohsub.previous`，安装后版本核验失败则恢复旧命令。多个配套资源不构成原子事务。
 
-随项目提供的 **HEAD Formula** 从 master 分支构建：
+需要从 master 构建未发布代码时，显式指定 `--HEAD`（需要 Homebrew Rust 构建工具链）：
 
 ```bash
 brew install --HEAD leo1394/dohsub/dohsub

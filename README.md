@@ -15,7 +15,22 @@
 
 ## Install
 
-macOS/Linux, arm64/x86_64; `curl` is needed for HTTPS. Build using Rust **1.94+**. This version has been tested on the current Apple Silicon Mac only. Linux and older OS/runtime compatibility remain unverified.
+Install the stable release with Homebrew:
+
+```bash
+brew install leo1394/dohsub/dohsub
+```
+
+Homebrew downloads the matching precompiled binary and verifies its SHA256. The Apple Silicon download is about **1.65 MB**; stable installs do not compile source or require Rust/LLVM. macOS uses the system `curl`; Linux requires `curl` at runtime. Releases cover macOS/Linux arm64/x86_64. macOS binaries target 11.0+; Linux GNU builds target glibc 2.35+. Native installation is verified on the current Apple Silicon Mac; Intel version execution is verified through Rosetta, and native Linux/older OS runtime compatibility remains unverified.
+
+To update an existing Homebrew install:
+
+```bash
+brew update
+brew upgrade leo1394/dohsub/dohsub
+```
+
+Source builds require Rust **1.94+**.
 
 From this local checkout, without Homebrew:
 
@@ -34,7 +49,7 @@ cargo build --release --locked
 
 `--binary` trusts the supplied file; it cannot establish release checksum provenance. The installer stages the binary and generated resources before replacement, saves `bin/dohsub.previous`, and restores it if final verification fails. Resource updates are not a multi-file atomic transaction.
 
-The included **HEAD-only** Formula builds from the master branch:
+To build unreleased changes from master with Homebrew, explicitly request `--HEAD` (requires the Homebrew Rust build toolchain):
 
 ```bash
 brew install --HEAD leo1394/dohsub/dohsub
