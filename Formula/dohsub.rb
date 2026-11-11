@@ -1,6 +1,8 @@
 class Dohsub < Formula
   desc "Local QX subscription server with private DNS-over-HTTPS node updates"
   homepage "https://github.com/leo1394/homebrew-dohsub"
+  url "https://github.com/leo1394/homebrew-dohsub/archive/refs/tags/v0.1.1.tar.gz"
+  sha256 "d094299e4aca2214146d4e995da26b11e6df80f624b8879a468cff22a767da0f"
   license "MIT"
   # Build from the master branch; stable source archives require a verified release checksum.
   head "https://github.com/leo1394/homebrew-dohsub.git", branch: "master"
