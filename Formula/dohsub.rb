@@ -1,17 +1,46 @@
 class Dohsub < Formula
   desc "Local QX subscription server with private DNS-over-HTTPS node updates"
   homepage "https://github.com/leo1394/homebrew-dohsub"
-  url "https://github.com/leo1394/homebrew-dohsub/archive/refs/tags/v0.1.1.tar.gz"
-  sha256 "d094299e4aca2214146d4e995da26b11e6df80f624b8879a468cff22a767da0f"
+  version "0.1.1"
   license "MIT"
-  # Build from the master branch; stable source archives require a verified release checksum.
-  head "https://github.com/leo1394/homebrew-dohsub.git", branch: "master"
+  revision 1
 
-  depends_on "rust" => :build
-  depends_on "curl"
+  head do
+    url "https://github.com/leo1394/homebrew-dohsub.git", branch: "master"
+    depends_on "rust" => :build
+  end
+
+  uses_from_macos "curl"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.1/dohsub-aarch64-apple-darwin", using: :nounzip
+      sha256 "c70108f73002303173dfb7a4198ca3465c4a690e926a11e300414fe979c02070"
+    end
+    on_intel do
+      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.1/dohsub-x86_64-apple-darwin", using: :nounzip
+      sha256 "8499e5c60c73a3ff00081afaa4c58b03f0bc6c6acaa9eb563a667b599c68f643"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.1/dohsub-aarch64-unknown-linux-gnu", using: :nounzip
+      sha256 "5f0301aa53e95c8c1edf5386b48080a4290b8c42d54bc4b360b8e35eab27763f"
+    end
+    on_intel do
+      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.1/dohsub-x86_64-unknown-linux-gnu", using: :nounzip
+      sha256 "e4de5eb341219069138e1dc47a0d39692757e99d4b8cc7c954008fad9988eec8"
+    end
+  end
 
   def install
-    system "cargo", "install", *std_cargo_args
+    if build.head?
+      system "cargo", "install", *std_cargo_args
+    else
+      bin.install Dir["dohsub-*"].first => "dohsub"
+    end
+    chmod 0755, bin/"dohsub"
     generate_completions_from_executable(bin/"dohsub", "completion", shell_parameter_format: :arg)
     man1.mkpath
     (man1/"dohsub.1").write Utils.safe_popen_read(bin/"dohsub", "man")
