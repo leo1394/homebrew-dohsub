@@ -1,6 +1,6 @@
 [package]
 name = "dohsub"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.94"
 description = "A small local subscription server with DNS-over-HTTPS address updates"

@@ -15,6 +15,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -122,12 +123,28 @@ def main():
         try:
             v=run('--version').stdout
             check(v==run('version').stdout and len(v.splitlines())==2 and f'dohsub version {VERSION} ('.encode() in v and REPO.encode() in v)
-            for args in [[],['help'],['help','config','set'],['config','set','--help'],['upgrade','--help'],['completion','zsh'],['man']]:run(*args)
+            for args in [[],['help'],['help','config','set'],['config','set','--help'],['upgrade','--help'],['status','--help'],['completion','zsh'],['man']]:run(*args)
+            fresh=run('status').stdout
+            check(b'Service: stopped' in fresh and b'Saved DoH: not configured' in fresh and b'Staged nodes: 0' in fresh)
             check(not (tmp/'state').exists())
             check(b'version' in run('versoin',code=2).stderr)
             check(b'--file' in run('import','--fiel','file',code=2).stderr)
             run('start',code=1)
             check(not (tmp/'state/control.sock').exists())
+            # Stale sockets are stopped; invalid replies are not reported as stopped.
+            control=tmp/'state/control.sock'
+            stale=socket.socket(socket.AF_UNIX);stale.bind(str(control));stale.close()
+            check(b'Service: stopped' in run('status').stdout)
+            control.unlink()
+            broken=socket.socket(socket.AF_UNIX);broken.bind(str(control));broken.listen(1)
+            def invalid_response():
+                connection,_=broken.accept()
+                with connection:
+                    connection.recv(4096);connection.sendall(b'invalid status\n')
+            worker=threading.Thread(target=invalid_response,daemon=True);worker.start()
+            failed=run('status',code=1)
+            worker.join(timeout=3);broken.close();control.unlink()
+            check(b'Service: unresponsive' in failed.stdout and b'Service: stopped' not in failed.stdout)
             run('config','set','--doh','http://example.com',code=1)
             run('config','set','--doh','https://dns.example/query?private=test')
             check(b'REDACTED' in run('config','--list').stdout and b'private=test' not in run('config','--list').stdout)
@@ -152,6 +169,12 @@ def main():
             occupied.close()
             wait_for(lambda:status()['published_node_count']==1)
             token=(tmp/'state/token').read_text();path=f'/sub/{token}/nodes.conf'
+            before=(tmp/'dns.log').read_bytes()
+            current=run('status').stdout
+            check(b'Service: running' in current and b'Health: ready' in current and f'PID: {active["pid"]}'.encode() in current and f'Listening: http://127.0.0.1:{actual}'.encode() in current)
+            check(b'Active nodes: 1' in current and b'Published nodes: 1' in current and b'Saved DoH: configured' in current)
+            check(token.encode() not in current and b'fixture-only' not in current and b'https://dns.example' not in current and b'private=test' not in current)
+            check((tmp/'dns.log').read_bytes()==before)
             code,body=http_get(actual,path)
             check(code==200 and (PUBLIC_TEST_IPV4+':8443').encode() in body and b'fixture-only' in body)
             check(http_get(actual,'/sub/wrong/nodes.conf')[0]==404 and http_get(actual,path,host='attacker.example')[0]==403 and http_get(actual,path,origin=True)[0]==403)
@@ -162,7 +185,11 @@ def main():
             write(nodefile,line+'\n'+line.replace('one.example.com','missing.example.com').replace('US1','TW1'))
             run('import','--file',nodefile)
             check(status()['node_count']==1)
+            current=run('status').stdout
+            check(b'Active nodes: 1' in current and b'Staged nodes: 2' in current)
             run('refresh');wait_for(lambda:status()['node_count']==2 and 'missing.example.com' in status()['dns_retries'])
+            current=run('status').stdout
+            check(b'Health: partial' in current and b'Active nodes: 2' in current and b'Published nodes: 1' in current and b'DNS retry hosts: 1' in current)
             calls=(tmp/'dns.log').read_text().splitlines().count('missing.example.com')
             check(720<=status()['dns_retries']['missing.example.com']['retry_in_seconds']<=900)
             http_get(actual,path);time.sleep(.1)
@@ -212,8 +239,11 @@ def main():
             run('restart');check(status()['pid']!=pid)
             for tag in ['US1','TW1','SG1','JP1']:run('remove',tag)
             check(http_get(status()['port'],path)[0]==503)
+            check(b'Health: awaiting_import' in run('status').stdout)
             run('restore');check(status()['node_count']==1)
             run('stop');run('stop');check(not (tmp/'state/control.sock').exists())
+            stopped=run('status').stdout
+            check(b'Service: stopped' in stopped and b'Listening: none' in stopped and b'Staged nodes: 1' in stopped and b'Saved DoH: configured' in stopped)
             config_path=tmp/'state/config.json';saved_config=tmp/'config.saved'
             config_path.rename(saved_config);config_path.symlink_to(tmp/'missing-config-target')
             r=run('start','--doh','https://dns.example/query',code=1)

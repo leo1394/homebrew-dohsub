@@ -1,6 +1,6 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH dohsub 1  "dohsub 0.1.1"
+.TH dohsub 1  "dohsub 0.1.2"
 .SH NAME
 dohsub \- Serve a local QX subscription with automatically updated DoH\-resolved IPv4 addresses.
 .SH SYNOPSIS
@@ -33,6 +33,9 @@ Stop then start using cached configuration; validates DoH before stopping
 .TP
 dohsub\-stop(1)
 Stop the managed dohsub daemon
+.TP
+dohsub\-status(1)
+Show whether the daemon is running, its listener and node publication state
 .TP
 dohsub\-list(1)
 List staged nodes and active publication status without passwords
@@ -72,7 +75,7 @@ Examples:
 
 macOS and Linux. curl is required for HTTPS. State: ~/.dohsub (private).
 .SH VERSION
-v0.1.1
+v0.1.2
 .SH DESCRIPTION
 The resident service binds only to 127.0.0.1. It resolves unique node hostnames using
 HTTPS GET with an RFC 8484 DNS wire query, then publishes QX Shadowsocks nodes with

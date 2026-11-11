@@ -30,6 +30,7 @@ def main():
             out=subprocess.check_output(['bash','--noprofile','--norc','-c',body],env=env)
             checks+=1;return [p.decode() for p in out.split(b'\0') if p]
         assert 'restart' in bash(['dohsub','re'])
+        assert 'status' in bash(['dohsub','stat'])
         assert 'set' in bash(['dohsub','config','s'])
         assert '--import' in bash(['dohsub','start','--im'])
         assert 'zsh' in bash(['dohsub','completion','zs'])

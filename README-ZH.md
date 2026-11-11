@@ -88,6 +88,7 @@ dohsub config set --clear-interface
 | --- | --- |
 | `import --file FILE [-y]` | 从私有文件导入，逐项显示成功与失败 |
 | `add [--domain HOST] [-y]` | 从剪贴板导入完整配置；全部成功后清空剪贴板 |
+| `status` | 查看运行/停止状态、PID、监听地址、节点加载/发布数量及已保存配置概况；只读，不输出凭据 |
 | `list` | 查看暂存节点、运行中发布数量及重试状态，不显示密码 |
 | `refresh` | 加载暂存节点，并立即安排一轮 DNS 刷新；QX 仍需另外刷新 |
 | `remove 'Example-US'` | 按原始名称删除、备份，运行中立即加载 |

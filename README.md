@@ -88,6 +88,7 @@ dohsub config set --clear-interface
 | --- | --- |
 | `import --file FILE [-y]` | Import a private file; print each accepted/rejected item |
 | `add [--domain HOST] [-y]` | Import full configuration from clipboard; clear it after complete success |
+| `status` | Show running/stopped state, PID, listener, active/published node counts and saved configuration; read-only, no credentials |
 | `list` | Show staged nodes, active publication counts and retry state; no passwords |
 | `refresh` | Load staged nodes and queue one immediate DNS round; refresh QX separately |
 | `remove 'Example-US'` | Remove exact original tag, back up, and reload if running |

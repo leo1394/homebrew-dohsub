@@ -45,6 +45,8 @@ enum Action {
     Restart,
     #[command(about="Stop the managed dohsub daemon", after_help="Example: dohsub stop\nWaits for an in-progress HTTPS request (up to 8 seconds). Already stopped is successful.")]
     Stop,
+    #[command(about="Show whether the daemon is running, its listener and node publication state", after_help="Example: dohsub status\nRead-only local check; no external network requests. Stopped is successful; an unresponsive daemon is an error. Reports saved configuration separately from active state. No passwords, subscription tokens or DoH URLs are printed. Published nodes have resolved IPs; proxy connectivity is not tested.")]
+    Status,
     #[command(about="List staged nodes and active publication status without passwords", after_help="Example: dohsub list\nPublished means a public IPv4 is available, not that the Shadowsocks handshake has been tested.")]
     List,
     #[command(about="Load staged nodes and queue one immediate DNS refresh, bypassing backoff once", after_help="Example: dohsub refresh\nRequires a running daemon. Returns after queuing; use list to inspect results. Does not force QX to fetch its subscription.")]
@@ -134,6 +136,28 @@ fn completion(shell: clap_complete::Shell) -> Result<()> {
     } else {io::stdout().write_all(&out)?;}
     Ok(())
 }
+fn show_status(dir: &Path) -> Result<()> {
+    match service::request(dir,service::Request::Status) {
+        Ok(active)=>{
+            let pid=active["pid"].as_u64().filter(|pid|*pid>0).ok_or_else(||fail("Invalid daemon status response"))?;
+            let port=active["port"].as_u64().filter(|port|*port>0 && *port<=65535).ok_or_else(||fail("Invalid daemon status response"))?;
+            let health=active["status"].as_str().filter(|status|matches!(*status,"ready"|"partial"|"unavailable"|"awaiting_import")).ok_or_else(||fail("Invalid daemon status response"))?;
+            println!("Service: running\nHealth: {}\nPID: {}\nListening: http://127.0.0.1:{}",health,pid,port);
+            println!("Active nodes: {}\nPublished nodes: {}\nDNS retry hosts: {}\nSubscription requests: {}",active["node_count"],active["published_node_count"],active["dns_retries"].as_object().map_or(0,|retries|retries.len()),active["subscription_fetches"]);
+        },
+        Err(error)=>{
+            if error.downcast_ref::<io::Error>().is_some_and(|error|matches!(error.kind(),io::ErrorKind::NotFound|io::ErrorKind::ConnectionRefused)) {
+                println!("Service: stopped\nListening: none");
+            } else {
+                println!("Service: unresponsive");
+                return Err(fail("Cannot read daemon status; inspect the private service.log before restarting"));
+            }
+        }
+    }
+    let config:Config=store::load(&dir.join("config.json"))?;
+    println!("Saved DoH: {}\nConfigured port: {}\nStaged nodes: {}",if config.doh.is_some(){"configured"}else{"not configured"},config.port,load_nodes(dir)?.len());
+    Ok(())
+}
 fn run() -> Result<()> {
     let cli=Cli::parse();
     if cli.version {print!("{}",version_text());return Ok(());}
@@ -143,6 +167,7 @@ fn run() -> Result<()> {
         Action::Completion{shell}=>{completion(shell)?;return Ok(());},
         Action::Man=>{let mut cmd=Cli::command();cmd=cmd.version(VERSION);clap_mangen::Man::new(cmd).render(&mut io::stdout())?;print!("{}",include_str!("../man/extra.roff"));return Ok(());},
         Action::Upgrade{yes}=>return upgrade::run(yes),
+        Action::Status=>return show_status(&store::home()?),
         _=>()
     }
     let dir=store::home()?;store::init(&dir)?;

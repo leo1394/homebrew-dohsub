@@ -18,7 +18,7 @@ type Shared = Arc<(Mutex<State>, Condvar)>;
 #[serde(rename_all="snake_case")]
 pub enum Request { Status, Reload, Refresh, Stop }
 pub fn request(dir: &Path, op: Request) -> Result<Value> {
-    let mut stream=UnixStream::connect(dir.join("control.sock")).map_err(|_| fail("dohsub is not running"))?;
+    let mut stream=UnixStream::connect(dir.join("control.sock")).map_err(|error| std::io::Error::new(error.kind(),"dohsub is not running"))?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?; stream.set_write_timeout(Some(Duration::from_secs(5)))?;
     serde_json::to_writer(&mut stream,&op)?; stream.write_all(b"\n")?;
     let mut line=String::new(); BufReader::new(stream.take(1_048_577)).read_line(&mut line)?;
