@@ -1,9 +1,8 @@
 class Dohsub < Formula
   desc "Local QX subscription server with private DNS-over-HTTPS node updates"
   homepage "https://github.com/leo1394/homebrew-dohsub"
-  version "0.1.1"
+  version "0.1.2"
   license "MIT"
-  revision 1
 
   head do
     url "https://github.com/leo1394/homebrew-dohsub.git", branch: "master"
@@ -14,23 +13,23 @@ class Dohsub < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.1/dohsub-aarch64-apple-darwin", using: :nounzip
-      sha256 "c70108f73002303173dfb7a4198ca3465c4a690e926a11e300414fe979c02070"
+      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.2/dohsub-aarch64-apple-darwin", using: :nounzip
+      sha256 "812113f0d8a6c5d66557c7890ae3ca60a62149375259a58dcc5e76b7b427d7d9"
     end
     on_intel do
-      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.1/dohsub-x86_64-apple-darwin", using: :nounzip
-      sha256 "8499e5c60c73a3ff00081afaa4c58b03f0bc6c6acaa9eb563a667b599c68f643"
+      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.2/dohsub-x86_64-apple-darwin", using: :nounzip
+      sha256 "2f6fb8a508388163ac0606385a40abbb1583ca48577dd5e8729aeb154fe25a08"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.1/dohsub-aarch64-unknown-linux-gnu", using: :nounzip
-      sha256 "5f0301aa53e95c8c1edf5386b48080a4290b8c42d54bc4b360b8e35eab27763f"
+      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.2/dohsub-aarch64-unknown-linux-gnu", using: :nounzip
+      sha256 "487360830e3e1a67e64e4e8556dfcc10ad9aeacb5dcef5a435e38ca7952cfa84"
     end
     on_intel do
-      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.1/dohsub-x86_64-unknown-linux-gnu", using: :nounzip
-      sha256 "e4de5eb341219069138e1dc47a0d39692757e99d4b8cc7c954008fad9988eec8"
+      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.2/dohsub-x86_64-unknown-linux-gnu", using: :nounzip
+      sha256 "ba0ea40586176d0742b73cfb21f2f7f8b6ef560454675a6bd3c84aacd189de87"
     end
   end
 
