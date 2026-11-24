@@ -13,7 +13,6 @@ class Dohsub < Formula
   uses_from_macos "curl"
 
   on_macos do
-    depends_on macos: :monterey
     on_arm do
       url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.2/dohsub-aarch64-apple-darwin", using: :nounzip
       sha256 "812113f0d8a6c5d66557c7890ae3ca60a62149375259a58dcc5e76b7b427d7d9"
@@ -36,6 +35,7 @@ class Dohsub < Formula
   end
 
   def install
+    odie "dohsub requires macOS Monterey or later" if OS.mac? && MacOS.version < :monterey
     if build.head?
       system "cargo", "install", *std_cargo_args
     else
