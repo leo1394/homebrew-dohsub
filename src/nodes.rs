@@ -5,12 +5,12 @@ use std::{collections::{HashMap, HashSet}, net::Ipv4Addr};
 use crate::{Result, fail};
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Node { pub host: String, pub port: u16, pub options: Vec<(String, String)> }
+pub struct Node { pub host: String, pub port: u16, pub options: Vec<(String, String)>, #[serde(default)] pub relay: Option<Value> }
 impl Node {
     pub fn tag(&self) -> &str { self.options.iter().find(|(k,_)| k == "tag").map(|(_,v)|v.as_str()).unwrap_or("") }
     pub fn render(&self, address: &str) -> String {
-        let opts = self.options.iter().map(|(k,v)| format!("{}={}", k, if k == "tag" { format!("{} · AutoIP", v) } else { v.clone() })).collect::<Vec<_>>().join(", ");
-        format!("shadowsocks={}:{}, {}", address, self.port, opts)
+        let opts = self.options.iter().map(|(k,v)| format!("{}={}", k, if k == "tag" && self.relay.is_none() { format!("{} · AutoIP", v) } else { v.clone() })).collect::<Vec<_>>().join(", ");
+        format!("{}={}:{}, {}", if self.relay.is_some() {"socks5"} else {"shadowsocks"}, address, self.port, opts)
     }
 }
 pub fn public_ip(host: &str) -> bool {
@@ -74,10 +74,69 @@ pub fn parse_line(line: &str, domain: Option<&str>) -> Result<Node> {
         if value == "<redacted>" || (key == "method" && !value.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')) { return Err(fail("Invalid method or redacted password")); }
     }
     if !keys.contains("tag") { options.push(("tag".into(), format!("{}:{}", host, port))); }
-    Ok(Node {host, port, options})
+    Ok(Node {host, port, options, relay: None})
 }
 fn json_node(value: &Value, domain: Option<&str>) -> Result<Option<Node>> {
     let obj = value.as_object().ok_or_else(|| fail("Expected a Shadowsocks node object"))?;
+    for key in ["protocol","delivery"] {if obj.get(key).is_some_and(|v|!v.is_string()) {return Err(fail("Protocol/delivery must be strings"));}}
+    match obj.get("enable") { Some(Value::Bool(false)) => return Ok(None), Some(v) if v.as_i64() == Some(0) => return Ok(None), None | Some(Value::Bool(true)) => (), Some(v) if v.as_i64() == Some(1) => (), _ => return Err(fail("Invalid enable flag")) }
+    let protocol=obj.get("protocol").and_then(Value::as_str).unwrap_or("shadowsocks");
+    if !["shadowsocks","ss2022","papaya"].contains(&protocol) {return Err(fail("Unsupported node protocol"));}
+    let delivery=obj.get("delivery").and_then(Value::as_str).unwrap_or(if protocol=="papaya" {"relay"} else {"native"});
+    if !["native","relay"].contains(&delivery) || (protocol=="papaya" && delivery!="relay") || (protocol=="shadowsocks" && delivery=="relay") {return Err(fail("Unsupported protocol/delivery combination"));}
+    if obj.get("enable").is_some_and(|v|v==&Value::Bool(false) || v.as_i64()==Some(0)) {return Ok(None);}
+    let method=obj.get("method").and_then(Value::as_str).unwrap_or("");
+    if protocol=="shadowsocks" && obj.contains_key("host") {
+        let mut normalized=obj.clone();normalized.remove("protocol");normalized.remove("delivery");normalized.remove("host");
+        normalized.insert("hostname".into(),obj["host"].clone());normalized.insert("encryption".into(),Value::String(method.into()));
+        return json_node(&Value::Object(normalized),domain);
+    }
+    if protocol=="ss2022" {
+        let length=match method {"2022-blake3-aes-128-gcm"=>16,"2022-blake3-aes-256-gcm"=>32,_=>return Err(fail("SS2022 requires an explicit supported AES method"))};
+        let password=obj.get("password").and_then(Value::as_str).ok_or_else(||fail("Missing SS2022 password"))?;
+        for key in password.split(':') {if STANDARD.decode(key).map_or(true,|bytes|bytes.len()!=length) {return Err(fail("Invalid SS2022 key length or encoding"));}}
+        if delivery=="native" {
+            let mut normalized=obj.clone();normalized.remove("protocol");normalized.remove("delivery");
+            normalized.insert("hostname".into(),obj.get("host").cloned().ok_or_else(||fail("Missing host"))?);
+            normalized.insert("encryption".into(),Value::String(method.into()));
+            normalized.remove("host");
+            return json_node(&Value::Object(normalized),domain);
+        }
+    }
+    if delivery=="relay" {
+        if domain.is_some() {return Err(fail("--domain is unsupported for relay nodes"));}
+        let host=obj.get("host").and_then(Value::as_str).filter(|h|host_valid(h)).ok_or_else(||fail("Invalid relay upstream host"))?;
+        let port=obj.get("port").and_then(Value::as_u64).filter(|p|*p>0 && *p<=65535).ok_or_else(||fail("Invalid relay upstream port"))?;
+        if obj.get("params").is_some_and(|p|!p.as_object().is_some_and(|o|o.is_empty())) {return Err(fail("Unsupported relay parameters"));}
+        if protocol=="papaya" {
+        for key in ["server_key","user_key"] {
+            let text=obj.get("auth").and_then(|a|a.get(key)).and_then(Value::as_str).ok_or_else(||fail("Missing relay authentication"))?;
+            let bytes=STANDARD.decode(text).map_err(|_|fail("Invalid relay authentication"))?;
+            if bytes.len()!=16 && bytes.len()!=32 {return Err(fail("Invalid relay key length"));}
+        }
+        let server=STANDARD.decode(obj["auth"]["server_key"].as_str().unwrap()).unwrap();
+        let user=STANDARD.decode(obj["auth"]["user_key"].as_str().unwrap()).unwrap();
+        if server.len()!=user.len() {return Err(fail("Mismatched relay keys"));}
+        }
+        let id=obj.get("id").and_then(Value::as_u64).ok_or_else(||fail("Missing stable relay node id"))?;
+        let alias=obj.get("alias").and_then(Value::as_str).filter(|v|clean(v)).unwrap_or("Relay");
+        let tag=format!("{} · Relay-{}",alias,id);
+        use sha2::{Digest,Sha256};
+        let hash=Sha256::digest(format!("{}:{}:{}",host,port,id).as_bytes());
+        let listen=40000+u16::from_be_bytes([hash[0],hash[1]])%20000;
+        let mut listen=listen;let mut tag=tag;let mut username="dohsub".to_string();let mut password=crate::store::random_token()?;
+        if let Some(listener)=obj.get("listener") {
+            let listener=listener.as_object().ok_or_else(||fail("Invalid relay listener configuration"))?;
+            if listener.keys().any(|k|!["port","username","password","tag"].contains(&k.as_str())) {return Err(fail("Unsupported relay listener field"));}
+            if let Some(port)=listener.get("port") {listen=port.as_u64().filter(|p|*p>0 && *p<=65535).ok_or_else(||fail("Invalid listener port"))? as u16;}
+            for (key,target) in [("username",&mut username),("password",&mut password),("tag",&mut tag)] {
+                if let Some(value)=listener.get(key) {*target=value.as_str().filter(|v|clean(v) && *v!="<redacted>" && v.len()<=255).ok_or_else(||fail("Invalid listener option"))?.to_string();}
+            }
+        }
+        let options=vec![("username".into(),username),("password".into(),password), ("udp-relay".into(),"false".into()),("tag".into(),tag)];
+        let mut upstream=value.clone();upstream["protocol"]=Value::String(protocol.into());
+        return Ok(Some(Node {host:"127.0.0.1".into(),port:listen,options,relay:Some(upstream)}));
+    }
     match obj.get("enable") { Some(Value::Bool(false)) => return Ok(None), Some(v) if v.as_i64() == Some(0) => return Ok(None), None | Some(Value::Bool(true)) => (), Some(v) if v.as_i64() == Some(1) => (), _ => return Err(fail("Invalid enable flag")) }
     let port = obj.get("server_port").or_else(|| obj.get("port")).and_then(Value::as_u64).filter(|p| *p > 0 && *p <= 65535).ok_or_else(|| fail("Invalid server_port"))?;
     if obj.get("port").is_some_and(|v| v.as_u64() != Some(port)) { return Err(fail("Conflicting port fields")); }
@@ -116,12 +175,51 @@ pub fn parse_input(text: &str, domain: Option<&str>) -> Result<Report> {
 }
 pub fn merge(existing: &[Node], incoming: &[Node]) -> Vec<Node> {
     let mut out = existing.to_vec(); let mut positions: HashMap<String,usize> = out.iter().enumerate().map(|(i,n)|(n.tag().into(),i)).collect();
-    for n in incoming { if let Some(i) = positions.get(n.tag()) { out[*i] = n.clone(); } else { positions.insert(n.tag().into(),out.len()); out.push(n.clone()); } }
+    for n in incoming {
+        let identity=|a:&Node,b:&Node| match (&a.relay,&b.relay) {
+            (Some(a),Some(b))=>{
+                let p=|v:&Value|v["protocol"].as_str().unwrap_or("").to_string();
+                a["id"].as_u64().is_some() && a["id"]==b["id"] && p(a)==p(b)
+            },_=>false
+        };
+        if let Some(i)=out.iter().position(|old|identity(old,n)) {
+            let mut updated=n.clone();updated.port=out[i].port;
+            for key in ["username","password","tag"] {
+                if let Some((_,old))=out[i].options.iter().find(|(k,_)|k==key) {
+                    if let Some((_,new))=updated.options.iter_mut().find(|(k,_)|k==key) {*new=old.clone();}
+                }
+            }
+            out[i]=updated;
+        } else if let Some(i)=positions.get(n.tag()) {out[*i]=n.clone();} else {positions.insert(n.tag().into(),out.len());out.push(n.clone());}
+    }
     out
 }
 #[cfg(test)] mod tests {
     use super::*;
     const LINE: &str = "shadowsocks=relay.example.com:8443, method=chacha20-ietf-poly1305, password=fixture-only, tag=US1";
+    #[test] fn explicit_protocol_delivery_and_stable_reimport() {
+        let key=STANDARD.encode([9u8;16]);
+        let base=serde_json::json!({"id":51,"protocol":"ss2022","delivery":"native","host":"node.example.com","port":443,"method":"2022-blake3-aes-128-gcm","password":format!("{}:{}",key,key),"alias":"Standard"});
+        let native=json_node(&base,None).unwrap().unwrap();assert!(native.relay.is_none());assert!(native.render("8.8.8.8").starts_with("shadowsocks="));
+        let mut relay=base.clone();relay["delivery"]="relay".into();let first=json_node(&relay,None).unwrap().unwrap();assert_eq!(first.relay.as_ref().unwrap()["protocol"],"ss2022");
+        let mut changed=relay.clone();changed["alias"]="Renamed".into();changed["host"]="changed.example.com".into();
+        let next=json_node(&changed,None).unwrap().unwrap();let merged=merge(&[first.clone()],&[next]);assert_eq!(merged.len(),1);assert_eq!(merged[0].port,first.port);assert_eq!(merged[0].options,first.options);
+        let mut bad=base.clone();bad["password"]="not-base64".into();assert!(json_node(&bad,None).is_err());
+        bad=base.clone();bad["protocol"]="papaya".into();assert!(json_node(&bad,None).is_err());
+        bad=base.clone();bad["protocol"]="unknown".into();assert!(json_node(&bad,None).is_err());
+    }
+    #[test] fn relay_migration_and_merge() {
+        let old=parse_line(LINE,None).unwrap();
+        let legacy=serde_json::json!({"host":old.host,"port":old.port,"options":old.options});
+        let decoded:Node=serde_json::from_value(legacy).unwrap();assert!(decoded.relay.is_none());
+        let key=STANDARD.encode([7u8;16]);
+        let value=serde_json::json!([{"id":42,"protocol":"papaya","host":"relay.example.com","port":443,"params":{},"auth":{"server_key":key,"user_key":key},"alias":"Test"}]);
+        let a=parse_input(&value.to_string(),None).unwrap().nodes.remove(0);
+        let b=parse_input(&value.to_string(),None).unwrap().nodes.remove(0);
+        assert_eq!(a.port,b.port);assert!(a.render("127.0.0.1").starts_with("socks5="));
+        let merged=merge(&[decoded.clone()],&[a]);assert_eq!(merged.len(),2);assert!(merged[0]==decoded);
+        let mut bad=value.clone();bad[0]["params"]=serde_json::json!({"ascii-first-request":false});assert_eq!(parse_input(&bad.to_string(),None).unwrap().failures,1);
+    }
     #[test] fn partial_and_merge() { let r=parse_input(&format!("{}\nbad\n{}",LINE,LINE),None).unwrap(); assert_eq!(r.nodes.len(),1); assert_eq!(r.failures,2); let a=parse_line(LINE,None).unwrap(); let b=parse_line(&LINE.replace("8443","8444"),None).unwrap(); assert!(merge(&[a],&[b.clone()])==vec![b]); }
     #[test] fn ss_and_json() { let uri=format!("ss://{}@example.com:443#US1",STANDARD.encode("chacha20-ietf-poly1305:fixture-only")); assert_eq!(parse_line(&uri,None).unwrap().tag(),"US1"); let r=parse_input(r#"[{"hostname":"example.com","server_port":8443,"port":8443,"encryption":"chacha20-ietf-poly1305","password":"fixture-only","alias":"JP1","enable":1},{"enable":0}]"#,None).unwrap(); assert_eq!(r.nodes.len(),1); assert_eq!(r.failures,0); }
     #[test] fn json_ignores_provider_metadata() {

@@ -1,6 +1,6 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH dohsub 1  "dohsub 0.1.2"
+.TH dohsub 1  "dohsub 0.2.0"
 .SH NAME
 dohsub \- Serve a local QX subscription with automatically updated DoH\-resolved IPv4 addresses.
 .SH SYNOPSIS
@@ -15,6 +15,9 @@ Print version and repository (no network)
 \fB\-h\fR, \fB\-\-help\fR
 Print help
 .SH SUBCOMMANDS
+.TP
+dohsub\-relay\-license(1)
+Show the bundled relay engine license
 .TP
 dohsub\-config(1)
 Save or inspect private cached settings; changes apply on next start/restart
@@ -75,7 +78,7 @@ Examples:
 
 macOS and Linux. curl is required for HTTPS. State: ~/.dohsub (private).
 .SH VERSION
-v0.1.2
+v0.2.0
 .SH DESCRIPTION
 The resident service binds only to 127.0.0.1. It resolves unique node hostnames using
 HTTPS GET with an RFC 8484 DNS wire query, then publishes QX Shadowsocks nodes with

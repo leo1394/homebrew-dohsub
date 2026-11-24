@@ -82,7 +82,7 @@ pub fn start(dir: &Path, mut config: Config, explicit: bool) -> Result<u16> {
 fn available(state: &State) -> Vec<(&Node,String)> {
     let now=store::now();
     state.runtime.nodes.iter().filter_map(|n| {
-        if public_ip(&n.host) {Some((n,n.host.clone()))} else {state.saved.cache.get(&n.host).filter(|r|public_ip(&r.ip) && now<=r.expires.saturating_add(900)).map(|r|(n,r.ip.clone()))}
+        if n.relay.is_some() {std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127,0,0,1],n.port)),Duration::from_millis(20)).ok().map(|_|(n,n.host.clone()))} else if public_ip(&n.host) {Some((n,n.host.clone()))} else {state.saved.cache.get(&n.host).filter(|r|public_ip(&r.ip) && now<=r.expires.saturating_add(900)).map(|r|(n,r.ip.clone()))}
     }).collect()
 }
 fn health(state: &State) -> Value {
@@ -104,7 +104,7 @@ fn scheduler(dir: PathBuf, shared: Shared, stopped: Arc<AtomicBool>) {
             let (mutex,cv)=&*shared; let mut s=mutex.lock().unwrap();
             loop {
                 if stopped.load(Ordering::Relaxed) {return;}
-                let hosts=s.runtime.nodes.iter().filter(|n|!public_ip(&n.host)).map(|n|n.host.clone()).collect::<BTreeSet<_>>();
+                let hosts=s.runtime.nodes.iter().filter(|n|n.relay.is_none() && !public_ip(&n.host)).map(|n|n.host.clone()).collect::<BTreeSet<_>>();
                 let now=store::now();
                 let next=hosts.iter().map(|h| s.saved.cache.get(h).map(|v|v.expires).unwrap_or(0).max(s.saved.retries.get(h).map(|v|v.next).unwrap_or(0))).min().unwrap_or(u64::MAX);
                 if s.force || next<=now {
@@ -171,6 +171,7 @@ pub unsafe fn serve(dir: &Path, fd: RawFd, lockfd: RawFd) -> Result<()> {
     let listener=unsafe {TcpListener::from_raw_fd(fd)};
     if !listener.local_addr()?.ip().is_loopback() {return Err(fail("Refusing non-loopback listener"));}
     let runtime:Runtime=serde_json::from_slice(&store::read(&dir.join("runtime.json"))?).map_err(|_|fail("Invalid runtime snapshot"))?;
+    let _relays=crate::relay::Engines::start(&runtime.nodes,&runtime.config)?;
     let mut saved:Saved=store::load(&dir.join("dns-cache.json"))?;
     if saved.doh!=runtime.config.doh {saved=Saved {doh:runtime.config.doh.clone(),..Default::default()};}
     let hosts=runtime.nodes.iter().map(|n|n.host.clone()).collect::<BTreeSet<_>>();
@@ -197,6 +198,7 @@ pub unsafe fn serve(dir: &Path, fd: RawFd, lockfd: RawFd) -> Result<()> {
                 Request::Stop=>{stopped.store(true,Ordering::Relaxed);shared.1.notify_all();Ok(json!({"stopped":true}))},
                 Request::Reload|Request::Refresh=>{
                     let nodes:Vec<Node>=store::load(&dir.join("nodes.json"))?;
+                    if nodes.iter().filter(|n|n.relay.is_some()).collect::<Vec<_>>()!=s.runtime.nodes.iter().filter(|n|n.relay.is_some()).collect::<Vec<_>>() {return Err(fail("Relay changes require a restart"));}
                     let force=matches!(op,Request::Refresh);
                     let runtime=Runtime {config:s.runtime.config.clone(),nodes};
                     let mut saved=s.saved.clone();

@@ -187,11 +187,13 @@ def main():
             check(status()['node_count']==1)
             current=run('status').stdout
             check(b'Active nodes: 1' in current and b'Staged nodes: 2' in current)
+            retry_started=time.monotonic()
             run('refresh');wait_for(lambda:status()['node_count']==2 and 'missing.example.com' in status()['dns_retries'])
             current=run('status').stdout
             check(b'Health: partial' in current and b'Active nodes: 2' in current and b'Published nodes: 1' in current and b'DNS retry hosts: 1' in current)
             calls=(tmp/'dns.log').read_text().splitlines().count('missing.example.com')
-            check(720<=status()['dns_retries']['missing.example.com']['retry_in_seconds']<=900)
+            remaining=status()['dns_retries']['missing.example.com']['retry_in_seconds']
+            check(max(0,720-int(time.monotonic()-retry_started)-1)<=remaining<=900)
             http_get(actual,path);time.sleep(.1)
             check((tmp/'dns.log').read_text().splitlines().count('missing.example.com')==calls)
             run('refresh');wait_for(lambda:(tmp/'dns.log').read_text().splitlines().count('missing.example.com')>calls)

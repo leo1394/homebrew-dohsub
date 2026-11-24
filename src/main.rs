@@ -1,3 +1,4 @@
+mod relay;
 mod dns;
 mod nodes;
 mod service;
@@ -10,7 +11,7 @@ use store::{Config, Lock};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 fn fail(message: impl Into<String>) -> Box<dyn std::error::Error + Send + Sync> { Box::new(io::Error::other(message.into())) }
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const RELEASE_DATE: &str = "2026-11-11";
+const RELEASE_DATE: &str = "2026-11-24";
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 fn version_text() -> String { format!("dohsub version {} ({})\n{}\n",VERSION,RELEASE_DATE,REPOSITORY) }
 
@@ -28,11 +29,13 @@ struct Connection {
     doh: Option<String>,
     #[arg(long, value_parser=clap::value_parser!(u16).range(1..), value_hint=ValueHint::Other, help="Local port; explicit collision fails, cached/default collision increments (default 55355)")]
     port: Option<u16>,
-    #[arg(long, value_hint=ValueHint::Other, help="Bind outgoing DoH requests to this interface (e.g. en0); cached if omitted")]
+    #[arg(long, value_hint=ValueHint::Other, help="Bind outgoing DoH and relay upstream requests to this interface (e.g. en0); cached if omitted")]
     interface: Option<String>,
 }
 #[derive(Subcommand)]
 enum Action {
+    #[command(about="Show the bundled relay engine license")] RelayLicense,
+    #[command(name="__relay-resolve", hide=true)] RelayResolve { #[arg(long)] host: String, #[arg(long)] interface: String },
     #[command(about="Save or inspect private cached settings; changes apply on next start/restart", args_conflicts_with_subcommands=true, after_help="Examples:\n  dohsub config set --doh https://dns.example.com/dns-query --port 55355\n  dohsub config --list\n\nConfiguration files are private. --list redacts URL query values. --clear-interface restores automatic routing.")]
     Config { #[arg(long)] list: bool, #[command(subcommand)] action: Option<ConfigAction> },
     #[command(about="Validate DoH, reserve a loopback port and start the background subscription service", after_help="Examples:\n  dohsub start\n  dohsub start --doh https://dns.example.com/dns-query --port 55356 --import nodes.json\n\nRequires curl and a reachable HTTPS DNS-wire endpoint. A valid negative DNS reply proves reachability. Optional import is saved before startup; failed startup leaves those nodes staged. Prints a private subscription URL. Does not enable login startup.")]
@@ -163,11 +166,21 @@ fn run() -> Result<()> {
     if cli.version {print!("{}",version_text());return Ok(());}
     let Some(action)=cli.command else {Cli::command().print_help()?;println!();return Ok(());};
     match action {
+        Action::RelayLicense=>{print!("{}\n{}",include_str!("../relay-engine/LICENSE"),include_str!("../relay-engine/COPYING"));return Ok(());},
         Action::Version=>{print!("{}",version_text());return Ok(());},
         Action::Completion{shell}=>{completion(shell)?;return Ok(());},
         Action::Man=>{let mut cmd=Cli::command();cmd=cmd.version(VERSION);clap_mangen::Man::new(cmd).render(&mut io::stdout())?;print!("{}",include_str!("../man/extra.roff"));return Ok(());},
         Action::Upgrade{yes}=>return upgrade::run(yes),
         Action::Status=>return show_status(&store::home()?),
+        Action::RelayResolve{host,interface}=>{
+            if interface.is_empty() || interface.starts_with("utun") || interface.starts_with("tun") || interface=="lo0" || !interface.bytes().all(|b|b.is_ascii_alphanumeric() || b"._-".contains(&b)) {return Err(fail("Relay requires a physical egress interface"));}
+            let mut config:Config=store::load(&store::home()?.join("config.json"))?;
+            let doh=url::Url::parse(config.doh.as_deref().ok_or_else(||fail("DoH is not configured"))?)?;
+            if doh.host_str().and_then(|h|h.parse::<std::net::IpAddr>().ok()).is_none() {return Err(fail("Relay DoH needs an IP-literal HTTPS endpoint to avoid system DNS bootstrap"));}
+            config.interface=Some(format!("if!{}",interface));
+            let (ips,ttl)=if nodes::public_ip(&host) {(vec![host],3600)} else {dns::resolve(&config,&host).map_err(|_|fail("Independent relay DoH failed"))?};
+            println!("{}",serde_json::json!({"ips":ips,"ttl":ttl}));return Ok(());
+        },
         _=>()
     }
     let dir=store::home()?;store::init(&dir)?;
@@ -187,7 +200,7 @@ fn run() -> Result<()> {
         },
         Action::Import{file,domain,yes}=>{let bytes=store::read(&expand(&file))?;let text=std::str::from_utf8(&bytes).map_err(|_|fail("Node file is not UTF-8"))?;import_text(&dir,text,domain.as_deref(),yes,false)?;},
         Action::Add{domain,yes}=>{let text=clipboard(None)?;import_text(&dir,&text,domain.as_deref(),yes,true)?;},
-        Action::Restart=>{let _config_guard=Lock::acquire(&dir.join("config.lock"),true)?;let c:Config=store::load(&dir.join("config.json"))?;let nodes=load_nodes(&dir)?;dns::preflight(&c,nodes.iter().find(|n|!nodes::public_ip(&n.host)).map(|n|n.host.as_str()).unwrap_or("example.com"))?;if service::running(&dir){service::stop(&dir)?;}started(&dir,c,false)?;},
+        Action::Restart=>{let _config_guard=Lock::acquire(&dir.join("config.lock"),true)?;let c:Config=store::load(&dir.join("config.json"))?;let nodes=load_nodes(&dir)?;dns::preflight(&c,nodes.iter().find(|n|n.relay.is_none() && !nodes::public_ip(&n.host)).map(|n|n.host.as_str()).unwrap_or("example.com"))?;if service::running(&dir){service::stop(&dir)?;}started(&dir,c,false)?;},
         Action::Stop=>{if service::running(&dir){service::stop(&dir)?;println!("dohsub stopped.");}else{println!("dohsub is already stopped.");}},
         Action::List=>{let nodes=load_nodes(&dir)?;let active=service::request(&dir,service::Request::Status).ok();for n in &nodes {let published=active.as_ref().and_then(|s|s["nodes"].as_array()).is_some_and(|ns|ns.iter().any(|v|v["tag"]==n.tag() && v["published"]==true));println!("{}\t{}:{}\t{}",n.tag(),n.host,n.port,if published{"published (active tag)"}else{"staged / unresolved"});}println!("{} staged node(s). Service: {}",nodes.len(),active.as_ref().and_then(|v|v["status"].as_str()).unwrap_or("stopped"));if let Some(value)=active {println!("Active: {} nodes; {} published. DNS retries: {}",value["node_count"],value["published_node_count"],value["dns_retries"]);}},
         Action::Refresh=>{let v=service::request(&dir,service::Request::Refresh)?;println!("Loaded {} node(s); one DNS refresh queued. Use list to inspect results, then refresh QX.",v["loaded_nodes"]);},

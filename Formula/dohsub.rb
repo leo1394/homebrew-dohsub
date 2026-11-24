@@ -2,16 +2,18 @@ class Dohsub < Formula
   desc "Local QX subscription server with private DNS-over-HTTPS node updates"
   homepage "https://github.com/leo1394/homebrew-dohsub"
   version "0.1.2"
-  license "MIT"
+  license all_of: ["MIT", "GPL-3.0-or-later"]
 
   head do
     url "https://github.com/leo1394/homebrew-dohsub.git", branch: "master"
+    depends_on "go" => :build
     depends_on "rust" => :build
   end
 
   uses_from_macos "curl"
 
   on_macos do
+    depends_on macos: :monterey
     on_arm do
       url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.1.2/dohsub-aarch64-apple-darwin", using: :nounzip
       sha256 "812113f0d8a6c5d66557c7890ae3ca60a62149375259a58dcc5e76b7b427d7d9"
@@ -47,6 +49,7 @@ class Dohsub < Formula
 
   test do
     output = shell_output("#{bin}/dohsub --version")
+    assert_match "GNU General Public License", shell_output("#{bin}/dohsub relay-license")
     assert_equal 2, output.lines.count
     assert_match "https://github.com/leo1394/homebrew-dohsub", output
     ENV["DOHSUB_HOME"] = testpath/"private-state"
