@@ -53,13 +53,13 @@ func handle(c net.Conn,cfg config) {
  b,e:=readBytes(c,2);if e!=nil{return};port:=binary.BigEndian.Uint16(b);if port==0{return}
  m,server,papaya,e:=methodForNode(cfg);if e!=nil{return}
  upstream,e:=dialUpstream(cfg);if e!=nil{c.Write([]byte{5,4,0,1,0,0,0,0,0,0});return};defer upstream.Close()
- upstream.SetDeadline(time.Now().Add(5*time.Minute))
+ upstream.SetDeadline(time.Now().Add(15*time.Second))
  var wrapped net.Conn=upstream
  if papaya {wrapped=&asciiConn{Conn:upstream,server:server}}
  remote,e:=m.DialConn(wrapped,M.ParseSocksaddr(net.JoinHostPort(host,strconv.Itoa(int(port)))));if e!=nil{emitUpstream("handshake_failed");c.Write([]byte{5,1,0,1,0,0,0,0,0,0});return}
- c.Write([]byte{5,0,0,1,0,0,0,0,0,0});c.SetDeadline(time.Now().Add(5*time.Minute))
+ if _,e=c.Write([]byte{5,0,0,1,0,0,0,0,0,0});e!=nil{return}
  remote=&observedConn{Conn:remote}
- done:=make(chan struct{},1);go func(){io.Copy(remote,c);done<-struct{}{}}();io.Copy(c,remote);c.Close();upstream.Close();<-done
+ relayTraffic(c,remote,5*time.Minute)
 }
 func methodForNode(cfg config)(SS.Method,[]byte,bool,error){
  papaya:=cfg.Node.Protocol=="papaya"

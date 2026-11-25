@@ -191,8 +191,8 @@ using interface-bound IPv4 sockets. Resolution or binding failures never fall ba
 to system DNS or an unbound socket. This reduces TUN recursion risk; independence
 from a particular packet-tunnel product still requires route-level verification.
 UDP is disabled in generated entries; no automatic
-node switching or direct fallback occurs. Connections have a five-minute lifetime
-limit and each relay accepts up to 32 concurrent clients. A dead helper's endpoint
+node switching or direct fallback occurs. Connections close after five minutes without successful reads or writes;
+activity in either direction renews the shared idle timeout and each relay accepts up to 32 concurrent clients. A dead helper's endpoint
 is withheld from new subscriptions; restart the daemon to recover it.
 
 QX must run on the same Mac because relay listeners bind only to 127.0.0.1.
