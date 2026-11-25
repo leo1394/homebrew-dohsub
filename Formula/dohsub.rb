@@ -1,7 +1,7 @@
 class Dohsub < Formula
   desc "Local QX subscription server with private DNS-over-HTTPS node updates"
   homepage "https://github.com/leo1394/homebrew-dohsub"
-  version "0.2.1"
+  version "0.2.2"
   license all_of: ["MIT", "GPL-3.0-or-later"]
 
   head do
@@ -14,23 +14,23 @@ class Dohsub < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.2.1/dohsub-aarch64-apple-darwin", using: :nounzip
-      sha256 "b21b0216f5b3c7e5577655d7c1634972f25ef440286fc71dcff9cf3afe88d4f3"
+      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.2.2/dohsub-aarch64-apple-darwin", using: :nounzip
+      sha256 "502b707272b5097a1d81153155cbafc9c7fad38faaa1828f8b1b88edd7155270"
     end
     on_intel do
-      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.2.1/dohsub-x86_64-apple-darwin", using: :nounzip
-      sha256 "bd8eb77f08168ee812e17eb9c77c4eb7178d04a566236c9a025fa1251d451207"
+      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.2.2/dohsub-x86_64-apple-darwin", using: :nounzip
+      sha256 "71fa2e2a3959e20afc6ced228a138bd451ee447641b25c97c91cffa34890f122"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.2.1/dohsub-aarch64-unknown-linux-gnu", using: :nounzip
-      sha256 "655c14e0339392e5590cc1333bdfaaf3f590f3934d8222f9dc1dd5131dec9cfb"
+      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.2.2/dohsub-aarch64-unknown-linux-gnu", using: :nounzip
+      sha256 "531f40106e9da562ae6e3a399ebe46a5ecc7bd1230d2f2e6566333a61059b0da"
     end
     on_intel do
-      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.2.1/dohsub-x86_64-unknown-linux-gnu", using: :nounzip
-      sha256 "f288b510255e4473b55eccbb49c5bd3906521ae3d9de2c5cf706cb7ec6197440"
+      url "https://github.com/leo1394/homebrew-dohsub/releases/download/v0.2.2/dohsub-x86_64-unknown-linux-gnu", using: :nounzip
+      sha256 "d18b770dcab1be67cf486cce9f2f79b3d80f7416bbdd4a54eb3f003c2080571a"
     end
   end
 
