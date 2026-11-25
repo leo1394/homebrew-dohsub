@@ -56,8 +56,9 @@ func handle(c net.Conn,cfg config) {
  upstream.SetDeadline(time.Now().Add(5*time.Minute))
  var wrapped net.Conn=upstream
  if papaya {wrapped=&asciiConn{Conn:upstream,server:server}}
- remote,e:=m.DialConn(wrapped,M.ParseSocksaddr(net.JoinHostPort(host,strconv.Itoa(int(port)))));if e!=nil{c.Write([]byte{5,1,0,1,0,0,0,0,0,0});return}
+ remote,e:=m.DialConn(wrapped,M.ParseSocksaddr(net.JoinHostPort(host,strconv.Itoa(int(port)))));if e!=nil{emitUpstream("handshake_failed");c.Write([]byte{5,1,0,1,0,0,0,0,0,0});return}
  c.Write([]byte{5,0,0,1,0,0,0,0,0,0});c.SetDeadline(time.Now().Add(5*time.Minute))
+ remote=&observedConn{Conn:remote}
  done:=make(chan struct{},1);go func(){io.Copy(remote,c);done<-struct{}{}}();io.Copy(c,remote);c.Close();upstream.Close();<-done
 }
 func methodForNode(cfg config)(SS.Method,[]byte,bool,error){
@@ -80,6 +81,8 @@ func main(){
  if json.NewDecoder(io.LimitReader(os.Stdin,1048576)).Decode(&cfg)!=nil || (cfg.Node.Protocol!="papaya" && cfg.Node.Protocol!="ss2022") || cfg.ListenPort<1 || cfg.ListenPort>65535 || cfg.Resolver=="" || cfg.Interface=="" || cfg.Username=="" || cfg.Password=="" || len(cfg.Node.Params)!=0 {os.Exit(2)}
  if _,_,_,err:=methodForNode(cfg);err!=nil{os.Exit(2)}
  l,e:=net.Listen("tcp",net.JoinHostPort("127.0.0.1",strconv.Itoa(cfg.ListenPort)));if e!=nil{os.Exit(3)};defer l.Close();fmt.Println("READY")
+ upstreamCache.report=func(value dnsStatus){emit(value)}
+ stop:=make(chan struct{});defer close(stop);go upstreamCache.run(cfg,stop)
  slots:=make(chan struct{},32)
  for{c,e:=l.Accept();if e!=nil{return};select{case slots<-struct{}{}:go func(){defer func(){<-slots}();handle(c,cfg)}();default:c.Close()}}
 }

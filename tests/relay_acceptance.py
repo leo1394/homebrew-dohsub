@@ -24,7 +24,11 @@ with tempfile.TemporaryDirectory(prefix='dohsub-relay-accept-') as t:
   run('start','--port',str(port));started=True
   assert list((state/'engines').glob('dohsub-relay-*')),'Bundled engine was not extracted'
   token=(state/'token').read_text().strip()
-  text=urllib.request.urlopen('http://127.0.0.1:'+str(port)+'/sub/'+token+'/nodes.conf',timeout=5).read().decode()
+  deadline=time.monotonic()+30
+  while True:
+   text=urllib.request.urlopen('http://127.0.0.1:'+str(port)+'/sub/'+token+'/nodes.conf',timeout=5).read().decode()
+   if 'socks5=127.0.0.1:' in text or time.monotonic()>=deadline:break
+   time.sleep(.1)
   assert 'shadowsocks=8.8.8.8:443' in text and 'socks5=127.0.0.1:' in text
   relay=saved[1];options=dict(relay['options'])
   args=['curl','--silent','--show-error','--max-time','20','--proxy','socks5h://127.0.0.1:'+str(relay['port']),'--proxy-user',options['username']+':'+options['password'],'--output','/dev/null','--write-out','%{http_code}','https://example.com/']

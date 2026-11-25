@@ -1,6 +1,6 @@
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use hickory_proto::{op::{Message, Query, ResponseCode}, rr::{Name, RData, RecordType}};
-use std::{collections::HashSet, io::Write, process::{Command, Stdio}};
+use std::{collections::HashSet, io::Write, process::{Command, Stdio}, time::{Duration, Instant}};
 use url::Url;
 use crate::{Result, fail, store::Config, nodes::public_ip};
 
@@ -24,16 +24,23 @@ pub fn query(config: &Config, host: &str) -> Result<Message> {
     url.set_query(None);
     for (k,v) in pairs { url.query_pairs_mut().append_pair(&k,&v); }
     url.query_pairs_mut().append_pair("dns", &URL_SAFE_NO_PAD.encode(packet));
-    let mut cmd = Command::new("curl");
-    cmd.args(["--disable","--config","-","--silent","--show-error","--fail","--noproxy","*","--connect-timeout","3","--max-time","8","--max-filesize","65535","--header","accept: application/dns-message"]);
-    if let Some(interface) = &config.interface { cmd.arg("--interface").arg(interface); }
-    let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|_| fail("curl is required for HTTPS requests"))?;
-    let mut input = child.stdin.take().ok_or_else(|| fail("Cannot prepare DoH request"))?;
-    let input_result = writeln!(input,"url = \"{}\"",url.as_str()); drop(input);
-    let result = child.wait_with_output()?;
-    input_result?;
-    if !result.status.success() { return Err(fail("DoH HTTPS request failed (timeout, TLS, HTTP or network); URL credentials were not logged")); }
-    parse_response(&result.stdout, &name)
+    let deadline=Instant::now()+Duration::from_secs(10);
+    for attempt in 0..3 {
+        let remaining=deadline.saturating_duration_since(Instant::now()).as_secs_f64().min(8.0);
+        if remaining<0.1 {break;}
+        let mut cmd = Command::new("curl");
+        cmd.args(["--disable","--config","-","--silent","--show-error","--fail","--noproxy","*","--connect-timeout","3","--max-time",&format!("{:.3}",remaining),"--max-filesize","65535","--header","accept: application/dns-message"]);
+        if let Some(interface) = &config.interface { cmd.arg("--interface").arg(interface); }
+        let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|_| fail("curl is required for HTTPS requests"))?;
+        let mut input = child.stdin.take().ok_or_else(|| fail("Cannot prepare DoH request"))?;
+        let input_result = writeln!(input,"url = \"{}\"",url.as_str()); drop(input);
+        let result = child.wait_with_output()?;
+        input_result?;
+        if result.status.success() {return parse_response(&result.stdout,&name);}
+        if attempt==2 || !matches!(result.status.code(),Some(6|7|16|18|28|35|52|55|56|92)) {break;}
+        std::thread::sleep(Duration::from_millis(100*(attempt+1)).min(deadline.saturating_duration_since(Instant::now())));
+    }
+    Err(fail("DoH HTTPS request failed within retry budget; URL credentials were not logged"))
 }
 pub fn parse_response(bytes: &[u8], name: &Name) -> Result<Message> {
     let answer = Message::from_vec(bytes).map_err(|_| fail("DoH returned malformed DNS data"))?;

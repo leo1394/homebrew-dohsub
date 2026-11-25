@@ -324,3 +324,7 @@ data and responses do not repeat this envelope.
 This flow describes TCP. Papaya differs from standard SS2022 in its key-derivation
 contexts and outer first-request envelope. Using the same cipher or concatenating
 two keys alone does not provide protocol interoperability.
+
+### Relay DNS recovery
+
+Relays retry transient DoH transport failures within a 10-second budget, refresh DNS before TTL expiry, and back off after failures. Valid cached addresses remain usable during refresh; expired, private and fake IP addresses are refused. `dohsub status` reports DNS validity and the last upstream connection outcome separately. A listening port alone does not make a relay publishable. See [DNS recovery and relay health](docs/resilience.md).

@@ -148,6 +148,9 @@ fn show_status(dir: &Path) -> Result<()> {
             let health=active["status"].as_str().filter(|status|matches!(*status,"ready"|"partial"|"unavailable"|"awaiting_import")).ok_or_else(||fail("Invalid daemon status response"))?;
             println!("Service: running\nHealth: {}\nPID: {}\nListening: http://127.0.0.1:{}",health,pid,port);
             println!("Active nodes: {}\nPublished nodes: {}\nDNS retry hosts: {}\nSubscription requests: {}",active["node_count"],active["published_node_count"],active["dns_retries"].as_object().map_or(0,|retries|retries.len()),active["subscription_fetches"]);
+            if let Some(relays)=active["relay_health"].as_object() {for (port,state) in relays {
+                println!("Relay {}: DNS={} ({}s valid); upstream={}; last success={}",port,state["dns_state"].as_str().unwrap_or("unknown"),state["dns_expires"].as_u64().unwrap_or(0).saturating_sub(store::now()),state["upstream"].as_str().unwrap_or("unverified"),state["last_success"]);
+            }}
         },
         Err(error)=>{
             if error.downcast_ref::<io::Error>().is_some_and(|error|matches!(error.kind(),io::ErrorKind::NotFound|io::ErrorKind::ConnectionRefused)) {

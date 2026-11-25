@@ -12,7 +12,7 @@ pub struct Address { pub ip: String, pub expires: u64 }
 pub struct Retry { pub failures: u32, pub next: u64, pub negative: bool }
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct Saved { doh: Option<String>, cache: BTreeMap<String, Address>, retries: BTreeMap<String, Retry> }
-struct State { runtime: Runtime, saved: Saved, revision: u64, force: bool, fetches: u64 }
+struct State { relays: crate::relay::Health, runtime: Runtime, saved: Saved, revision: u64, force: bool, fetches: u64 }
 type Shared = Arc<(Mutex<State>, Condvar)>;
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all="snake_case")]
@@ -126,13 +126,15 @@ fn supervised_start(dir: &Path, config: &Config) -> Result<Option<u16>> {
 fn available(state: &State) -> Vec<(&Node,String)> {
     let now=store::now();
     state.runtime.nodes.iter().filter_map(|n| {
-        if n.relay.is_some() {std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127,0,0,1],n.port)),Duration::from_millis(20)).ok().map(|_|(n,n.host.clone()))} else if public_ip(&n.host) {Some((n,n.host.clone()))} else {state.saved.cache.get(&n.host).filter(|r|public_ip(&r.ip) && now<=r.expires.saturating_add(900)).map(|r|(n,r.ip.clone()))}
+        if n.relay.is_some() {if state.relays.lock().unwrap().get(&n.port).is_none_or(|r|r.dns_expires<=now) {return None;}std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127,0,0,1],n.port)),Duration::from_millis(20)).ok().map(|_|(n,n.host.clone()))} else if public_ip(&n.host) {Some((n,n.host.clone()))} else {state.saved.cache.get(&n.host).filter(|r|public_ip(&r.ip) && now<=r.expires.saturating_add(900)).map(|r|(n,r.ip.clone()))}
     }).collect()
 }
 fn health(state: &State) -> Value {
     let nodes=available(state); let count=nodes.len();
-    let status=if state.runtime.nodes.is_empty() {"awaiting_import"} else if count==0 {"unavailable"} else if count<state.runtime.nodes.len() {"partial"} else {"ready"};
-    json!({"pid":std::process::id(),"port":state.runtime.config.port,"status":status,"node_count":state.runtime.nodes.len(),"published_node_count":count,"subscription_fetches":state.fetches,
+    let relays=state.relays.lock().unwrap().clone();
+    let relay_failed=relays.values().any(|r|r.dns_expires<=store::now() || matches!(r.upstream.as_str(),"dns_failed"|"interface_failed"|"tcp_failed"|"handshake_failed"|"io_failed"|"engine_exited"));
+    let status=if state.runtime.nodes.is_empty() {"awaiting_import"} else if count==0 {"unavailable"} else if count<state.runtime.nodes.len() || relay_failed {"partial"} else {"ready"};
+    json!({"pid":std::process::id(),"port":state.runtime.config.port,"status":status,"node_count":state.runtime.nodes.len(),"published_node_count":count,"subscription_fetches":state.fetches,"relay_health":relays,
         "nodes":state.runtime.nodes.iter().map(|n|json!({"tag":n.tag(),"host":n.host,"port":n.port,"published":nodes.iter().any(|(p,_)|p.tag()==n.tag())})).collect::<Vec<_>>(),
         "dns_retries":state.saved.retries.iter().map(|(h,r)|(h,json!({"failures":r.failures,"reason":if r.negative {"nxdomain_or_no_address"} else {"transient"},"retry_in_seconds":r.next.saturating_sub(store::now())}))).collect::<BTreeMap<_,_>>()})
 }
@@ -225,7 +227,7 @@ fn serve_owned(dir: &Path, listener: TcpListener, _lock: Lock, runtime: Runtime)
     let hosts=runtime.nodes.iter().map(|n|n.host.clone()).collect::<BTreeSet<_>>();
     saved.retries.retain(|h,r|hosts.contains(h) && r.next<=store::now().saturating_add(21600));
     saved.cache.retain(|h,r|hosts.contains(h) && public_ip(&r.ip));
-    let shared:Shared=Arc::new((Mutex::new(State {runtime,saved,revision:0,force:false,fetches:0}),Condvar::new()));
+    let shared:Shared=Arc::new((Mutex::new(State {relays:_relays.1.clone(),runtime,saved,revision:0,force:false,fetches:0}),Condvar::new()));
     let stopped=Arc::new(AtomicBool::new(false));
     let server=Arc::new(tiny_http::Server::from_listener(listener,None).map_err(|_|fail("Cannot start HTTP server"))?);
     let socket_path=dir.join("control.sock");
