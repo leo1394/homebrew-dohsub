@@ -8,6 +8,8 @@ import socket
 import subprocess
 import tempfile
 import time
+import urllib.request
+import urllib.error
 from behavior import BINARY, MOCK, write
 
 
@@ -56,10 +58,21 @@ def main():
             assert (state/'control.sock').exists(), 'Isolated daemon startup timed out'
             wait(lambda v:v['relay_health'] and next(iter(v['relay_health'].values()))['dns_state']=='retrying')
             assert status()['published_node_count']==0, 'Listener alone was published as DNS-ready'
+            token=(state/'token').read_text().strip()
+            url=f'http://127.0.0.1:{port}/sub/{token}/nodes.conf?format=yaml'
+            try:urllib.request.urlopen(url,timeout=2);raise AssertionError('Unavailable relay published')
+            except urllib.error.HTTPError as error:assert error.code==503
+
             flag.unlink()
             ready=wait(lambda v:v['published_node_count']==1)
             relay=next(iter(ready['relay_health'].values()))
             assert relay['upstream']=='unverified' and relay['last_success']==0
+            with urllib.request.urlopen(url,timeout=2) as response:
+                assert response.headers['Content-Type']=='application/yaml; charset=utf-8'
+                payload=response.read().decode()
+            node=json.loads(payload.splitlines()[1].strip()[2:])
+            assert node['type']=='socks5' and node['server']=='127.0.0.1' and node['udp'] is False
+            assert 'auth' not in node and 'server_key' not in payload
             initial=relay['dns_expires']
             wait(lambda v:next(iter(v['relay_health'].values()))['dns_expires']>initial,10)
             flag.touch()

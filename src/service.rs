@@ -197,9 +197,17 @@ fn http_server(server: Arc<tiny_http::Server>, shared: Shared, token: String, st
         let (code,body,content_type)=if (host!=Some(valid_host.as_str()) && host!=Some(localhost.as_str())) || origin {(403,"Forbidden\n".into(),"text/plain")}
             else if request.method()!=&tiny_http::Method::Get && request.method()!=&tiny_http::Method::Head {(405,"Method not allowed\n".into(),"text/plain")}
             else if request.url()=="/health" {(200,health(&s).to_string(),"application/json")}
-            else if same_path(request.url(),&format!("/sub/{}/nodes.conf",token)) {
+            else if same_path(request.url().split('?').next().unwrap_or(""),&format!("/sub/{}/nodes.conf",token)) {
                 let nodes=available(&s);
-                if nodes.is_empty() {(503,"No resolved nodes yet; retain previous subscription\n".into(),"text/plain")}
+                let query=request.url().split_once('?').map(|(_,q)|q);
+                if query.is_some_and(|q|q!="format=yaml") {(400,"Supported query: format=yaml; omit the query for default output\n".into(),"text/plain")}
+                else if nodes.is_empty() {(503,"No resolved nodes yet; retain previous subscription\n".into(),"text/plain")}
+                else if query.is_some() {
+                    match crate::nodes::render_yaml(&nodes) {
+                        Ok(body)=>{if request.method()==&tiny_http::Method::Get {s.fetches+=1;} (200,body,"application/yaml; charset=utf-8")},
+                        Err(_)=>(422,"Nodes cannot be represented in YAML; check duplicate names and unsupported options\n".into(),"text/plain"),
+                    }
+                }
                 else {let body=nodes.iter().map(|(n,ip)|n.render(ip)).collect::<Vec<_>>().join("\n")+"\n"; if request.method()==&tiny_http::Method::Get {s.fetches+=1;} (200,body,"text/plain; charset=utf-8")}
             } else {(404,"Not found\n".into(),"text/plain")};
         drop(s);

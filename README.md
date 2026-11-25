@@ -337,3 +337,16 @@ use the default. Excess connections are closed and counted, without switching no
 service lifetime; successes do not erase failures. Upload/download errors identify
 the transfer direction, not which peer caused the error. Normal EOF and idle timeout
 are counted separately from failures. These are diagnostics, not automatic failover.
+
+### Subscription output
+
+Keep `/sub/<token>/nodes.conf` unchanged for the default Quantumult X output.
+Use `/sub/<token>/nodes.conf?format=yaml` for a YAML `proxies:` list compatible
+with Mihomo providers. Both outputs use the same available nodes and DNS cache.
+Native nodes become `ss`; relay nodes become local `socks5` entries with UDP disabled.
+The YAML uses JSON flow mappings for safe string quoting. SS method/password,
+TCP Fast Open, UDP and simple HTTP/TLS obfuscation are mapped explicitly.
+Unsupported options or duplicate output names return HTTP 422 rather than silently
+changing a node. Unknown, empty or repeated query parameters return HTTP 400.
+No available nodes returns HTTP 503 for either format. Relay clients must run on
+the same host. The output contains node credentials; keep the subscription token private.

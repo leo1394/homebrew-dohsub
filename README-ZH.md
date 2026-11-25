@@ -321,3 +321,13 @@ DoH 临时传输失败在 10 秒总预算内重试，DNS 在 TTL 到期前刷新
 `closed`、`last_failure` 和 `last_error`。计数覆盖当前服务运行期间，成功连接不清除
 故障历史。上传/下载错误表示传输方向，不能单独判定是哪端故障；正常 EOF 和空闲超时
 单独统计，不计为传输故障。这些指标用于诊断，不触发自动换节点。
+
+### 订阅输出格式
+
+`/sub/<token>/nodes.conf` 保持现有 Quantumult X 输出；增加 `?format=yaml`
+可取得兼容 Mihomo provider 的 YAML `proxies:` 列表。两种输出使用相同的可用节点
+和 DNS 缓存。原生节点输出为 `ss`，中继节点输出为本机 `socks5`，中继禁用 UDP。
+YAML 使用 JSON 流式映射保证字符串安全转义；显式转换 SS 加密与密码、TCP Fast Open、
+UDP 和 HTTP/TLS 简单混淆。遇到无法转换的选项或重复输出名称返回 HTTP 422，
+不静默改变节点含义。未知、空值或重复查询参数返回 HTTP 400；无可用节点时均返回
+HTTP 503。中继客户端须与 dohsub 同机运行。输出包含节点凭据，请保密订阅令牌。

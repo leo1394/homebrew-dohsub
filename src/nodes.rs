@@ -13,6 +13,40 @@ impl Node {
         format!("{}={}:{}, {}", if self.relay.is_some() {"socks5"} else {"shadowsocks"}, address, self.port, opts)
     }
 }
+// JSON flow mappings are valid YAML; quoting is handled by serde_json.
+pub fn render_yaml(nodes: &[(&Node,String)]) -> Result<String> {
+    let mut body=String::from("proxies:\n");let mut names=HashSet::new();
+    for (node,address) in nodes {
+        let option=|key:&str|node.options.iter().find(|(k,_)|k==key).map(|(_,v)|v.as_str());
+        let relay=node.relay.is_some();
+        let name=if relay {node.tag().to_string()} else {format!("{} · AutoIP",node.tag())};
+        if !names.insert(name.clone()) {return Err(fail("YAML requires unique node names"));}
+        let mut value=serde_json::json!({"name":name,"type":if relay {"socks5"} else {"ss"},"server":address,"port":node.port,"udp":false});
+        for (key,text) in &node.options {
+            match key.as_str() {
+                "tag"=>(),
+                "password"=>value["password"]=text.clone().into(),
+                "method" if !relay=>value["cipher"]=text.clone().into(),
+                "username" if relay=>value["username"]=text.clone().into(),
+                "fast-open"|"udp-relay"=>{
+                    let flag=match text.as_str() {"true"=>true,"false"=>false,_=>return Err(fail("YAML requires boolean transport options"))};
+                    if relay && key=="udp-relay" && flag {return Err(fail("Relay UDP is unsupported"));}
+                    value[if key=="fast-open" {"tfo"} else {"udp"}]=flag.into();
+                },
+                "obfs"|"obfs-host" if !relay=>(),
+                _=>return Err(fail("Node contains an option unsupported by YAML output")),
+            }
+        }
+        if let Some(mode)=option("obfs") {
+            if !matches!(mode,"http"|"tls") {return Err(fail("Unsupported YAML obfuscation mode"));}
+            value["plugin"]="obfs".into();value["plugin-opts"]=serde_json::json!({"mode":mode});
+            if let Some(host)=option("obfs-host") {value["plugin-opts"]["host"]=host.into();}
+        }else if option("obfs-host").is_some() {return Err(fail("Obfuscation host requires a mode"));}
+        body.push_str("  - ");body.push_str(&serde_json::to_string(&value)?);body.push('\n');
+    }
+    if nodes.is_empty() {return Ok("proxies: []\n".into());}
+    Ok(body)
+}
 pub fn public_ip(host: &str) -> bool {
     let Ok(ip) = host.parse::<Ipv4Addr>() else { return false; };
     let [a,b,c,d] = ip.octets();
@@ -235,4 +269,23 @@ pub fn merge(existing: &[Node], incoming: &[Node]) -> Vec<Node> {
         let report=parse_input(incomplete,None).unwrap();assert_eq!(report.failures,1);assert!(report.nodes.is_empty());
     }
     #[test] fn no_injection_or_private_ip() { for s in [LINE.replace("relay.example.com","127.0.0.1"),LINE.replace("US1","US1\nsecret"),LINE.replace("fixture-only","<redacted>")] { assert!(parse_line(&s,None).is_err()); } }
+}
+
+#[cfg(test)] mod yaml_tests {
+    use super::*;
+    #[test] fn mixed_yaml_preserves_types_and_hides_upstream_keys() {
+        let native=parse_line("shadowsocks=8.8.8.8:443, method=aes-128-gcm, password=a\"b: #x, tag=Native, obfs=tls, obfs-host=example.com",None).unwrap();
+        let relay=Node {host:"127.0.0.1".into(),port:12345,options:vec![("tag".into(),"Relay".into()),("username".into(),"local".into()),("password".into(),"local-pass".into()),("udp-relay".into(),"false".into())],relay:Some(serde_json::json!({"auth":{"server_key":"never-export-this"}}))};
+        let text=render_yaml(&[(&native,"8.8.4.4".into()),(&relay,"127.0.0.1".into())]).unwrap();
+        let rows:Vec<Value>=text.lines().skip(1).map(|l|serde_json::from_str(l.trim().strip_prefix("- ").unwrap()).unwrap()).collect();
+        assert_eq!(rows[0]["server"],"8.8.4.4");assert_eq!(rows[0]["password"],"a\"b: #x");assert_eq!(rows[0]["plugin-opts"]["mode"],"tls");
+        assert_eq!(rows[1]["type"],"socks5");assert_eq!(rows[1]["udp"],false);assert_eq!(rows[1]["port"],12345);assert!(!text.contains("never-export-this"));
+        assert!(render_yaml(&[(&native,"8.8.4.4".into()),(&native,"8.8.8.8".into())]).is_err());
+        let mut bad=native.clone();bad.options.push(("unknown".into(),"value".into()));assert!(render_yaml(&[(&bad,"8.8.4.4".into())]).is_err());
+    }
+    #[test] fn native_ss2022_stays_native() {
+        let n=parse_line("shadowsocks=8.8.8.8:443, method=2022-blake3-aes-128-gcm, password=fixture, tag=SS2022, udp-relay=true, fast-open=false",None).unwrap();
+        let text=render_yaml(&[(&n,"8.8.8.8".into())]).unwrap();let v:Value=serde_json::from_str(text.lines().nth(1).unwrap().trim().strip_prefix("- ").unwrap()).unwrap();
+        assert_eq!(v["type"],"ss");assert_eq!(v["cipher"],"2022-blake3-aes-128-gcm");assert_eq!(v["udp"],true);assert_eq!(v["tfo"],false);
+    }
 }
