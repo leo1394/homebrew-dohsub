@@ -192,7 +192,7 @@ to system DNS or an unbound socket. This reduces TUN recursion risk; independenc
 from a particular packet-tunnel product still requires route-level verification.
 UDP is disabled in generated entries; no automatic
 node switching or direct fallback occurs. Connections close after five minutes without successful reads or writes;
-activity in either direction renews the shared idle timeout and each relay accepts up to 32 concurrent clients. A dead helper's endpoint
+activity in either direction renews the shared idle timeout and each relay accepts up to 256 concurrent clients by default. A dead helper's endpoint
 is withheld from new subscriptions; restart the daemon to recover it.
 
 QX must run on the same Mac because relay listeners bind only to 127.0.0.1.
@@ -328,3 +328,12 @@ two keys alone does not provide protocol interoperability.
 ### Relay DNS recovery
 
 Relays retry transient DoH transport failures within a 10-second budget, refresh DNS before TTL expiry, and back off after failures. Valid cached addresses remain usable during refresh; expired, private and fake IP addresses are refused. `dohsub status` reports DNS validity and the last upstream connection outcome separately. A listening port alone does not make a relay publishable. See [DNS recovery and relay health](docs/resilience.md).
+
+Relay capacity can be set with `relay_max_connections` in the private `config.json`
+(default 256 per node, range 16–4096; restart required). Existing configurations
+use the default. Excess connections are closed and counted, without switching nodes.
+`/health` exposes `active`, `peak`, `limit`, `rejected`, classified `failures`,
+`closed`, `last_failure` and `last_error` per relay. Counters cover the current
+service lifetime; successes do not erase failures. Upload/download errors identify
+the transfer direction, not which peer caused the error. Normal EOF and idle timeout
+are counted separately from failures. These are diagnostics, not automatic failover.

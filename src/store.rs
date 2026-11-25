@@ -5,9 +5,9 @@ use crate::{Result, fail};
 pub const DEFAULT_PORT: u16 = 55355;
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(default)]
-pub struct Config { pub doh: Option<String>, pub port: u16, pub interface: Option<String> }
+pub struct Config { pub doh: Option<String>, pub port: u16, pub interface: Option<String>, pub relay_max_connections: usize }
 impl Default for Config {
-    fn default() -> Self { Self { doh: None, port: DEFAULT_PORT, interface: None } }
+    fn default() -> Self { Self { doh: None, port: DEFAULT_PORT, interface: None, relay_max_connections: 256 } }
 }
 pub fn home() -> Result<PathBuf> {
     if let Some(p) = std::env::var_os("DOHSUB_HOME") { return Ok(PathBuf::from(p)); }

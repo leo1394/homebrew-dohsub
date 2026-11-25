@@ -37,6 +37,7 @@ type config struct {
  Resolver string `json:"resolver"`
  Interface string `json:"interface"`
  ListenPort int `json:"listen_port"`
+ MaxConnections int `json:"max_connections"`
  Username string `json:"username"`
  Password string `json:"password"`
  Node struct { Host string `json:"host"`; Port int `json:"port"`; Protocol string `json:"protocol"`; Method string `json:"method"`; Password string `json:"password"`; Params map[string]any `json:"params"`; Auth struct {Server string `json:"server_key"`; User string `json:"user_key"`} `json:"auth"` } `json:"node"`
@@ -59,7 +60,7 @@ func handle(c net.Conn,cfg config) {
  remote,e:=m.DialConn(wrapped,M.ParseSocksaddr(net.JoinHostPort(host,strconv.Itoa(int(port)))));if e!=nil{emitUpstream("handshake_failed");c.Write([]byte{5,1,0,1,0,0,0,0,0,0});return}
  if _,e=c.Write([]byte{5,0,0,1,0,0,0,0,0,0});e!=nil{return}
  remote=&observedConn{Conn:remote}
- relayTraffic(c,remote,5*time.Minute)
+ emit(struct{Event string `json:"event"`;Reason string `json:"reason"`}{"closed",relayTraffic(c,remote,5*time.Minute)})
 }
 func methodForNode(cfg config)(SS.Method,[]byte,bool,error){
  papaya:=cfg.Node.Protocol=="papaya"
@@ -79,10 +80,10 @@ func main(){
  parent:=os.Getppid();go func(){for{time.Sleep(time.Second);if syscall.Getppid()!=parent{os.Exit(0)}}}()
  var cfg config
  if json.NewDecoder(io.LimitReader(os.Stdin,1048576)).Decode(&cfg)!=nil || (cfg.Node.Protocol!="papaya" && cfg.Node.Protocol!="ss2022") || cfg.ListenPort<1 || cfg.ListenPort>65535 || cfg.Resolver=="" || cfg.Interface=="" || cfg.Username=="" || cfg.Password=="" || len(cfg.Node.Params)!=0 {os.Exit(2)}
+ if cfg.MaxConnections==0{cfg.MaxConnections=256};if cfg.MaxConnections<16 || cfg.MaxConnections>4096{os.Exit(2)}
  if _,_,_,err:=methodForNode(cfg);err!=nil{os.Exit(2)}
  l,e:=net.Listen("tcp",net.JoinHostPort("127.0.0.1",strconv.Itoa(cfg.ListenPort)));if e!=nil{os.Exit(3)};defer l.Close();fmt.Println("READY")
  upstreamCache.report=func(value dnsStatus){emit(value)}
  stop:=make(chan struct{});defer close(stop);go upstreamCache.run(cfg,stop)
- slots:=make(chan struct{},32)
- for{c,e:=l.Accept();if e!=nil{return};select{case slots<-struct{}{}:go func(){defer func(){<-slots}();handle(c,cfg)}();default:c.Close()}}
+ serveClients(l,cfg.MaxConnections,func(c net.Conn){handle(c,cfg)},emit)
 }
