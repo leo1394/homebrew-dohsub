@@ -11,7 +11,7 @@ use store::{Config, Lock};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 fn fail(message: impl Into<String>) -> Box<dyn std::error::Error + Send + Sync> { Box::new(io::Error::other(message.into())) }
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const RELEASE_DATE: &str = "2026-11-24";
+const RELEASE_DATE: &str = "2026-11-25";
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 fn version_text() -> String { format!("dohsub version {} ({})\n{}\n",VERSION,RELEASE_DATE,REPOSITORY) }
 
@@ -34,6 +34,7 @@ struct Connection {
 }
 #[derive(Subcommand)]
 enum Action {
+    #[command(about="Run in the foreground for launchd/systemd supervision; uses the exact saved port")] Run,
     #[command(about="Show the bundled relay engine license")] RelayLicense,
     #[command(name="__relay-resolve", hide=true)] RelayResolve { #[arg(long)] host: String, #[arg(long)] interface: String },
     #[command(about="Save or inspect private cached settings; changes apply on next start/restart", args_conflicts_with_subcommands=true, after_help="Examples:\n  dohsub config set --doh https://dns.example.com/dns-query --port 55355\n  dohsub config --list\n\nConfiguration files are private. --list redacts URL query values. --clear-interface restores automatic routing.")]
@@ -207,6 +208,7 @@ fn run() -> Result<()> {
         Action::Remove{name}=>{let _guard=Lock::acquire(&dir.join("nodes.lock"),true)?;let old=load_nodes(&dir)?;let new=old.iter().filter(|n|n.tag()!=name).cloned().collect::<Vec<_>>();if old.len()==new.len(){return Err(fail("No node with that exact tag; use dohsub list"));}change_nodes(&dir,&new)?;if service::running(&dir){service::request(&dir,service::Request::Reload)?;}println!("Removed node. Use restore to undo.");},
         Action::Restore=>{let _guard=Lock::acquire(&dir.join("nodes.lock"),true)?;let path=dir.join("nodes.previous.json");if !path.exists(){return Err(fail("No previous node snapshot"));}let previous:Vec<nodes::Node>=store::load(&path)?;change_nodes(&dir,&previous)?;if service::running(&dir){service::request(&dir,service::Request::Reload)?;}println!("Restored {} node(s).",previous.len());},
         Action::CopyResource=>{let active=service::request(&dir,service::Request::Status)?;let port=active["port"].as_u64().ok_or_else(||fail("Invalid service port"))?;let text=format!("http://127.0.0.1:{}/sub/{}/nodes.conf, tag=dohsub, update-interval=60, opt-parser=false, enabled=true",port,store::token(&dir)?);clipboard(Some(&text))?;println!("Private QX subscription line copied. Paste into [server_remote] and refresh.");},
+        Action::Run=>service::foreground(&dir)?,
         Action::Serve{fd,lock_fd}=>unsafe {service::serve(&dir,fd,lock_fd)?;},
         _=>unreachable!()
     }

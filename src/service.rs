@@ -39,9 +39,10 @@ pub fn choose_listener(port: u16, explicit: bool) -> Result<TcpListener> {
 }
 pub fn start(dir: &Path, mut config: Config, explicit: bool) -> Result<u16> {
     store::init(dir)?;
+    if let Some(port)=supervised_start(dir,&config)? {return Ok(port);}
     let lock=Lock::acquire(&dir.join("daemon.lock"),false)?;
     let nodes:Vec<Node>=store::load(&dir.join("nodes.json"))?;
-    let host=nodes.iter().find(|n| !public_ip(&n.host)).map(|n|n.host.as_str()).unwrap_or("example.com");
+    let host=nodes.iter().find(|n| n.relay.is_none() && !public_ip(&n.host)).map(|n|n.host.as_str()).unwrap_or("example.com");
     dns::preflight(&config,host)?;
     let listener=choose_listener(config.port,explicit)?;
     config.port=listener.local_addr()?.port();
@@ -78,6 +79,49 @@ pub fn start(dir: &Path, mut config: Config, explicit: bool) -> Result<u16> {
     }
     let _=child.kill();let _=child.wait();
     Err(fail("Daemon startup timed out"))
+}
+// Foreground ownership lets launchd/systemd supervise the actual service PID.
+pub fn foreground(dir: &Path) -> Result<()> {
+    let lock=Lock::acquire(&dir.join("daemon.lock"),false)?;
+    let config:Config=store::load(&dir.join("config.json"))?;
+    if config.doh.is_none() {return Err(fail("DoH is not configured"));}
+    let nodes:Vec<Node>=store::load(&dir.join("nodes.json"))?;
+    // Bind the saved port exactly: recovery must preserve the subscription URL.
+    let listener=choose_listener(config.port,true)?;
+    let runtime=Runtime {config,nodes};
+    store::token(dir)?;
+    store::save(&dir.join("runtime.json"),&runtime)?;
+    serve_owned(dir,listener,lock,runtime)
+}
+fn supervised_start(dir: &Path, config: &Config) -> Result<Option<u16>> {
+    let path=dir.join("launchd.json");
+    if !path.exists() {return Ok(None);}
+    #[cfg(not(target_os="macos"))]
+    { let _=config; return Err(fail("launchd supervision is only available on macOS")); }
+    #[cfg(target_os="macos")]
+    {
+        #[derive(Deserialize)] struct Supervisor {label:String}
+        let manager:Supervisor=serde_json::from_slice(&store::read(&path)?).map_err(|_|fail("Invalid launchd supervision settings"))?;
+        if manager.label.is_empty() || manager.label.len()>128 || !manager.label.bytes().all(|b|b.is_ascii_alphanumeric() || b".-_".contains(&b)) {return Err(fail("Invalid launchd label"));}
+        let target=format!("gui/{}/{}",unsafe {libc::geteuid()},manager.label);
+        if !Command::new("/bin/launchctl").args(["print",&target]).stdout(Stdio::null()).stderr(Stdio::null()).status()?.success() {return Err(fail("Configured launchd job is not loaded; bootstrap it before starting"));}
+        let nodes:Vec<Node>=store::load(&dir.join("nodes.json"))?;
+        dns::preflight(config,nodes.iter().find(|n|n.relay.is_none() && !public_ip(&n.host)).map(|n|n.host.as_str()).unwrap_or("example.com"))?;
+        store::save(&dir.join("config.json"),config)?;
+        // stop() releases the lock just before process exit; allow launchd to reap it.
+        let deadline=Instant::now()+Duration::from_secs(20);
+        while Instant::now()<deadline {
+            if !Command::new("/bin/launchctl").args(["kickstart",&target]).stdout(Stdio::null()).stderr(Stdio::null()).status()?.success() {return Err(fail("Cannot start the configured launchd job"));}
+            for _ in 0..10 {
+                if let Ok(value)=request(dir,Request::Status) {
+                    if value["port"].as_u64()!=Some(u64::from(config.port)) {return Err(fail("Supervised service has an unexpected port"));}
+                    return Ok(Some(config.port));
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+        Err(fail("Supervised startup timed out; inspect launchd logs"))
+    }
 }
 fn available(state: &State) -> Vec<(&Node,String)> {
     let now=store::now();
@@ -171,6 +215,10 @@ pub unsafe fn serve(dir: &Path, fd: RawFd, lockfd: RawFd) -> Result<()> {
     let listener=unsafe {TcpListener::from_raw_fd(fd)};
     if !listener.local_addr()?.ip().is_loopback() {return Err(fail("Refusing non-loopback listener"));}
     let runtime:Runtime=serde_json::from_slice(&store::read(&dir.join("runtime.json"))?).map_err(|_|fail("Invalid runtime snapshot"))?;
+    serve_owned(dir,listener,_lock,runtime)
+}
+fn serve_owned(dir: &Path, listener: TcpListener, _lock: Lock, runtime: Runtime) -> Result<()> {
+    eprintln!("dohsub service starting; pid={}",std::process::id());
     let _relays=crate::relay::Engines::start(&runtime.nodes,&runtime.config)?;
     let mut saved:Saved=store::load(&dir.join("dns-cache.json"))?;
     if saved.doh!=runtime.config.doh {saved=Saved {doh:runtime.config.doh.clone(),..Default::default()};}
@@ -218,6 +266,7 @@ pub unsafe fn serve(dir: &Path, fd: RawFd, lockfd: RawFd) -> Result<()> {
     }
     stopped.store(true,Ordering::Relaxed);shared.1.notify_all();server.unblock();
     let _=http.join();let _=worker.join();let _=fs::remove_file(socket_path);
+    eprintln!("dohsub service stopped normally; pid={}",std::process::id());
     Ok(())
 }
 pub fn stop(dir: &Path)->Result<()> {

@@ -80,7 +80,7 @@ dohsub config set --interface en0   # optional outgoing DoH interface
 dohsub config set --clear-interface
 ```
 
-`config --list` redacts URL query values. Cached setting changes apply at next start/restart. The service keeps running after CLI exit but is **not** registered for login/boot startup.
+`config --list` redacts URL query values. Cached setting changes apply at next start/restart. The service keeps running after CLI exit but is **not** registered for login/boot startup. For supervised login/boot startup, use `dohsub run` as the foreground process; see [Service supervision](docs/supervision.md).
 
 ## Everyday commands
 

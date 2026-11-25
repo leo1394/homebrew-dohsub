@@ -11,7 +11,8 @@ with tempfile.TemporaryDirectory(prefix='dohsub-relay-accept-') as t:
  conf=json.loads(source.read_text());conf['interface']=os.environ['DOHSUB_TEST_INTERFACE'];state=root/'state';state.mkdir(mode=0o700)
  (state/'config.json').write_text(json.dumps(conf));(state/'config.json').chmod(0o600)
  nodes=json.loads(pathlib.Path(os.environ['DOHSUB_PAPAYA_FILE']).read_text())
- node=root/'one.json';node.write_text(json.dumps(nodes[:1]));node.chmod(0o600)
+ papaya=next(n for n in nodes if n.get('protocol')=='papaya')
+ node=root/'one.json';node.write_text(json.dumps([papaya]));node.chmod(0o600)
  old=root/'old.conf';old.write_text('shadowsocks=8.8.8.8:443, method=aes-128-gcm, password=fixture-only, tag=Legacy-Acceptance\n');old.chmod(0o600)
  run('import','--file',str(old));before=json.loads((state/'nodes.json').read_text())[0]
  run('import','--file',str(node));saved=json.loads((state/'nodes.json').read_text());assert saved[0]==before and len(saved)==2
