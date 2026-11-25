@@ -57,6 +57,7 @@ func(c *dnsCache)resolve(cfg config)([]string,error){
 func(c *dnsCache)refresh(cfg config)([]string,error){
  c.Lock()
  if done:=c.refreshing;done!=nil{c.Unlock();<-done;c.Lock();defer c.Unlock();return c.cachedLocked()}
+ if c.now().Before(c.refreshAt) && c.now().Before(c.expires){defer c.Unlock();return c.cachedLocked()}
  if c.now().Before(c.nextAttempt){defer c.Unlock();return c.cachedLocked()}
  done:=make(chan struct{});c.refreshing=done;c.Unlock();c.publish()
  ips,ttl,err:=c.lookup(cfg)

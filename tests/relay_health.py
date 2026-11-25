@@ -45,10 +45,15 @@ def main():
             raise AssertionError('Relay health did not reach expected state')
         command('import','--file',root/'node.json')
         # Foreground startup must survive unavailable DoH.
-        process = subprocess.Popen([str(BINARY),'run'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        log = open(root/'service.log','w+')
+        process = subprocess.Popen([str(BINARY),'run'],env=env,stdout=log,stderr=log)
         try:
-            deadline=time.monotonic()+5
-            while not (state/'control.sock').exists() and time.monotonic()<deadline:time.sleep(.05)
+            deadline=time.monotonic()+15
+            while not (state/'control.sock').exists() and time.monotonic()<deadline:
+                if process.poll() is not None:
+                    log.flush();log.seek(0);raise AssertionError('Isolated daemon exited: '+log.read())
+                time.sleep(.05)
+            assert (state/'control.sock').exists(), 'Isolated daemon startup timed out'
             wait(lambda v:v['relay_health'] and next(iter(v['relay_health'].values()))['dns_state']=='retrying')
             assert status()['published_node_count']==0, 'Listener alone was published as DNS-ready'
             flag.unlink()
@@ -69,6 +74,7 @@ def main():
             if process.poll() is None:
                 try:command('stop');process.wait(timeout=15)
                 except Exception:process.kill();process.wait()
+            log.close()
 
 
 if __name__ == '__main__':

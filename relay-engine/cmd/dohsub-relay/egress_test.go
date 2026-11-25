@@ -63,3 +63,11 @@ func TestBackgroundRefreshBeforeTTL(t *testing.T){
  select{case <-refreshed:case <-time.After(2*time.Second):t.Fatal("DNS was not refreshed before expiration")}
  cache.Lock();fresh:=time.Now().Before(cache.expires);cache.Unlock();if !fresh{t.Fatal("prefetch did not retain valid TTL")}
 }
+
+func TestScheduledRefreshReusesForegroundAnswer(t *testing.T){
+ calls:=0
+ cache:=newDNSCache(func(config)([]string,time.Duration,error){calls++;return []string{"8.8.8.8"},time.Minute,nil})
+ if _,err:=cache.resolve(config{});err!=nil{t.Fatal(err)}
+ if _,err:=cache.refresh(config{});err!=nil{t.Fatal(err)}
+ if calls!=1{t.Fatal("scheduled refresh repeated a just-completed foreground lookup")}
+}
