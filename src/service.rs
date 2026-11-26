@@ -12,7 +12,7 @@ pub struct Address { pub ip: String, pub expires: u64 }
 pub struct Retry { pub failures: u32, pub next: u64, pub negative: bool }
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct Saved { doh: Option<String>, cache: BTreeMap<String, Address>, retries: BTreeMap<String, Retry> }
-struct State { relays: crate::relay::Health, runtime: Runtime, saved: Saved, revision: u64, force: bool, fetches: u64 }
+struct State { probes:BTreeMap<String,(String,u64)>, relays: crate::relay::Health, runtime: Runtime, saved: Saved, revision: u64, force: bool, fetches: u64 }
 type Shared = Arc<(Mutex<State>, Condvar)>;
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all="snake_case")]
@@ -136,6 +136,7 @@ fn health(state: &State) -> Value {
     let status=if state.runtime.nodes.is_empty() {"awaiting_import"} else if count==0 {"unavailable"} else if count<state.runtime.nodes.len() || relay_failed {"partial"} else {"ready"};
     json!({"pid":std::process::id(),"port":state.runtime.config.port,"status":status,"node_count":state.runtime.nodes.len(),"published_node_count":count,"subscription_fetches":state.fetches,"relay_health":relays,
         "nodes":state.runtime.nodes.iter().map(|n|json!({"tag":n.tag(),"host":n.host,"port":n.port,"published":nodes.iter().any(|(p,_)|p.tag()==n.tag())})).collect::<Vec<_>>(),
+        "autoip_health":state.runtime.nodes.iter().filter(|n|n.relay.is_none()).map(|n|{let found=available(state).into_iter().find(|(v,_)|v.tag()==n.tag()).and_then(|(_,ip)|state.probes.get(&probe_key(n,&ip)));json!({"tag":n.tag(),"state":found.filter(|(_,t)|store::now().saturating_sub(*t)<900).map(|(v,_)|v.as_str()).unwrap_or("unknown")})}).collect::<Vec<_>>(),
         "dns_retries":state.saved.retries.iter().map(|(h,r)|(h,json!({"failures":r.failures,"reason":if r.negative {"nxdomain_or_no_address"} else {"transient"},"retry_in_seconds":r.next.saturating_sub(store::now())}))).collect::<BTreeMap<_,_>>()})
 }
 fn retry_delay(negative: bool, failures: u32) -> u64 {
@@ -185,6 +186,50 @@ fn scheduler(dir: PathBuf, shared: Shared, stopped: Arc<AtomicBool>) {
         }
     }
 }
+fn subscription_node(node:&Node,probe:Option<&(String,u64)>,now:u64)->Node {
+    let mut result=node.clone();
+    if node.relay.is_none() && probe.is_some_and(|(state,time)|state=="unreachable" && now.saturating_sub(*time)<900) {
+        for (key,value) in &mut result.options {if key=="tag" {value.push_str(" · AutoIP · unreachable");}}
+    }
+    result
+}
+fn probe_key(node:&Node,ip:&str)->String {
+    use sha2::{Digest,Sha256};
+    format!("{:x}",Sha256::digest(serde_json::to_vec(&(node,ip)).unwrap()))
+}
+fn probe_loop(shared:Shared,stopped:Arc<AtomicBool>) {
+    while !stopped.load(Ordering::Relaxed) {
+        let jobs={let mut s=shared.0.lock().unwrap();
+            let now=store::now();s.probes.retain(|_,(_,t)|now.saturating_sub(*t)<900);
+            available(&s).into_iter().filter(|(n,_)|n.relay.is_none()).filter_map(|(n,ip)|{
+                let key=probe_key(n,&ip);
+                if s.probes.get(&key).is_some_and(|(_,t)|now.saturating_sub(*t)<300) {return None;}
+                Some((key,n.clone(),ip,s.runtime.config.interface.clone()))
+            }).collect::<Vec<_>>()};
+        for (key,node,ip,interface) in jobs {
+            if stopped.load(Ordering::Relaxed) {return;}
+            let option=|name:&str|node.options.iter().find(|(k,_)|k==name).map(|(_,v)|v.clone()).unwrap_or_default();
+            let result=(||->Result<String>{
+                if interface.is_none() || node.options.iter().any(|(k,_)|k=="obfs" || k=="obfs-host") {return Ok("unknown".into());}
+                let mut child=Command::new(crate::relay::executable()?).arg("--probe").stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn()?;
+                let input=json!({"IP":ip,"Port":node.port,"Interface":interface,"Method":option("method"),"Password":option("password")});
+                let sent=child.stdin.take().unwrap().write_all(input.to_string().as_bytes());
+                if sent.is_err() {let _=child.kill();let _=child.wait();return Ok("unknown".into());}
+                let deadline=Instant::now()+Duration::from_secs(18);
+                loop {
+                    if child.try_wait()?.is_some() {break;}
+                    if stopped.load(Ordering::Relaxed) || Instant::now()>=deadline {let _=child.kill();let _=child.wait();return Ok("unknown".into());}
+                    thread::sleep(Duration::from_millis(100));
+                }
+                let output=child.wait_with_output()?;
+                let value:Value=serde_json::from_slice(&output.stdout)?;
+                Ok(match value["result"].as_str(){Some("reachable")=>"reachable",Some("unreachable")=>"unreachable",_=>"unknown"}.into())
+            })().unwrap_or_else(|_|"unknown".into());
+            shared.0.lock().unwrap().probes.insert(key,(result,store::now()));
+        }
+        for _ in 0..5 {if stopped.load(Ordering::Relaxed) {return;}thread::sleep(Duration::from_secs(1));}
+    }
+}
 fn same_path(a: &str,b: &str)->bool {a.len()==b.len() && a.bytes().zip(b.bytes()).fold(0u8,|v,(x,y)|v|(x^y))==0}
 fn http_server(server: Arc<tiny_http::Server>, shared: Shared, token: String, stopped: Arc<AtomicBool>) {
     while !stopped.load(Ordering::Relaxed) {
@@ -198,7 +243,11 @@ fn http_server(server: Arc<tiny_http::Server>, shared: Shared, token: String, st
             else if request.method()!=&tiny_http::Method::Get && request.method()!=&tiny_http::Method::Head {(405,"Method not allowed\n".into(),"text/plain")}
             else if request.url()=="/health" {(200,health(&s).to_string(),"application/json")}
             else if same_path(request.url().split('?').next().unwrap_or(""),&format!("/sub/{}/nodes.conf",token)) {
-                let nodes=available(&s);
+                let owned=available(&s).into_iter().map(|(n,ip)|{
+                    let node=subscription_node(n,s.probes.get(&probe_key(n,&ip)),store::now());
+                    (node,ip)
+                }).collect::<Vec<_>>();
+                let nodes=owned.iter().map(|(n,ip)|(n,ip.clone())).collect::<Vec<_>>();
                 let query=request.url().split_once('?').map(|(_,q)|q);
                 if query.is_some_and(|q|q!="format=yaml") {(400,"Supported query: format=yaml; omit the query for default output\n".into(),"text/plain")}
                 else if nodes.is_empty() {(503,"No resolved nodes yet; retain previous subscription\n".into(),"text/plain")}
@@ -235,13 +284,14 @@ fn serve_owned(dir: &Path, listener: TcpListener, _lock: Lock, runtime: Runtime)
     let hosts=runtime.nodes.iter().map(|n|n.host.clone()).collect::<BTreeSet<_>>();
     saved.retries.retain(|h,r|hosts.contains(h) && r.next<=store::now().saturating_add(21600));
     saved.cache.retain(|h,r|hosts.contains(h) && public_ip(&r.ip));
-    let shared:Shared=Arc::new((Mutex::new(State {relays:_relays.1.clone(),runtime,saved,revision:0,force:false,fetches:0}),Condvar::new()));
+    let shared:Shared=Arc::new((Mutex::new(State {probes:BTreeMap::new(),relays:_relays.1.clone(),runtime,saved,revision:0,force:false,fetches:0}),Condvar::new()));
     let stopped=Arc::new(AtomicBool::new(false));
     let server=Arc::new(tiny_http::Server::from_listener(listener,None).map_err(|_|fail("Cannot start HTTP server"))?);
     let socket_path=dir.join("control.sock");
     if socket_path.exists() {fs::remove_file(&socket_path)?;}
     let control=UnixListener::bind(&socket_path)?;
     fs::set_permissions(&socket_path,fs::Permissions::from_mode(0o600))?;
+    let probe_worker={let sh=shared.clone();let st=stopped.clone();thread::spawn(move||probe_loop(sh,st))};
     let worker={let sh=shared.clone();let st=stopped.clone();let d=dir.to_path_buf();thread::spawn(move||scheduler(d,sh,st))};
     let http={let sh=shared.clone();let st=stopped.clone();let se=server.clone();let tok=store::token(dir)?;thread::spawn(move||http_server(se,sh,tok,st))};
     for stream in control.incoming() {
@@ -275,7 +325,7 @@ fn serve_owned(dir: &Path, listener: TcpListener, _lock: Lock, runtime: Runtime)
         if stopped.load(Ordering::Relaxed) {break;}
     }
     stopped.store(true,Ordering::Relaxed);shared.1.notify_all();server.unblock();
-    let _=http.join();let _=worker.join();let _=fs::remove_file(socket_path);
+    let _=http.join();let _=worker.join();let _=probe_worker.join();let _=fs::remove_file(socket_path);
     eprintln!("time={} dohsub service stopped normally; pid={}",store::now(),std::process::id());
     Ok(())
 }
@@ -291,4 +341,22 @@ pub fn stop(dir: &Path)->Result<()> {
 #[cfg(test)] mod tests {
     use super::*;
     #[test] fn port_collision_and_jitter_caps() {let a=choose_listener(0,true).unwrap();let p=a.local_addr().unwrap().port();assert!(choose_listener(p,true).is_err());if p<65535 {assert!(choose_listener(p,false).unwrap().local_addr().unwrap().port()>p);}for n in 1..20 {let v=retry_delay(true,n);assert!((720..=21600).contains(&v));let v=retry_delay(false,n);assert!((24..=900).contains(&v));}}
+}
+
+#[cfg(test)] mod probe_tests {
+    use super::*;
+    #[test] fn subscription_markers_follow_fresh_results_in_both_formats() {
+        let report=crate::nodes::parse_input("shadowsocks=8.8.8.8:443, method=chacha20-ietf-poly1305, password=fixture, tag=Test",None).unwrap();
+        let node=&report.nodes[0];let bad=("unreachable".into(),100);
+        let marked=subscription_node(node,Some(&bad),101);
+        assert!(marked.render("8.8.8.8").ends_with("tag=Test · AutoIP · unreachable"));
+        let yaml=crate::nodes::render_yaml(&[(&marked,"8.8.8.8".into())]).unwrap();
+        let value:Value=serde_json::from_str(yaml.lines().nth(1).unwrap().trim().strip_prefix("- ").unwrap()).unwrap();
+        assert_eq!(value["name"],"Test · AutoIP · unreachable");
+        assert_eq!(node.tag(),"Test");
+        for result in [None,Some(("reachable".into(),100)),Some(("unknown".into(),100)),Some(("unreachable".into(),0))] {
+            assert_eq!(subscription_node(node,result.as_ref(),901).tag(),"Test");
+        }
+        assert_ne!(probe_key(node,"8.8.8.8"),probe_key(node,"1.1.1.1"));
+    }
 }

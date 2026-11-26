@@ -77,6 +77,7 @@ func methodForNode(cfg config)(SS.Method,[]byte,bool,error){
  return m,server,papaya,nil
 }
 func main(){
+ if len(os.Args)==2 && os.Args[1]=="--probe"{probeMain();return}
  parent:=os.Getppid();go func(){for{time.Sleep(time.Second);if syscall.Getppid()!=parent{os.Exit(0)}}}()
  var cfg config
  if json.NewDecoder(io.LimitReader(os.Stdin,1048576)).Decode(&cfg)!=nil || (cfg.Node.Protocol!="papaya" && cfg.Node.Protocol!="ss2022") || cfg.ListenPort<1 || cfg.ListenPort>65535 || cfg.Resolver=="" || cfg.Interface=="" || cfg.Username=="" || cfg.Password=="" || len(cfg.Node.Params)!=0 {os.Exit(2)}

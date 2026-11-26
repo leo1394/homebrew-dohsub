@@ -1,7 +1,7 @@
 use std::{io::{BufRead,BufReader,Write},process::{Child,Command,Stdio},sync::{mpsc,Arc,Mutex},thread,time::Duration};
 use crate::{nodes::Node,Result,fail};
 const ENGINE:&[u8]=include_bytes!(concat!(env!("OUT_DIR"),"/dohsub-relay"));
-fn executable()->Result<std::path::PathBuf> {
+pub(crate) fn executable()->Result<std::path::PathBuf> {
     use std::{fs::{self,OpenOptions},io::Read,os::unix::fs::{OpenOptionsExt,PermissionsExt,MetadataExt}};
     use sha2::{Digest,Sha256};
     let root=crate::store::home()?.join("engines");crate::store::init(&root)?;

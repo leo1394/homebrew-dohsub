@@ -105,3 +105,33 @@ TCP 预算，避免首个地址耗尽全部时间。不会切换节点、改变�
 DNS 地址集版本。被抑制次数在恢复状态变化时汇总发布，持续拒绝请求时最多每 30 秒更新一次。诊断日志使用时间戳、
 进程号和本地监听端口关联，按上述规则记录并轮转，最多保留 2 MiB，不包含密钥、
 上游地址或私有 DoH URL。重启后的历史记录仍可用于追查故障。
+
+## AutoIP availability markers / AutoIP 可用性标记
+
+AutoIP publication still requires a usable DNS address. A separate serial worker
+checks supported native SS/SS2022 nodes every five minutes through the configured
+physical interface, using the published IP and node credentials. It verifies TLS
+certificates and an HTTP 2xx/3xx response from example.com or www.cloudflare.com.
+Both targets must fail before the subscription tag gains ` · unreachable`.
+Any successful target removes the marker. Checks take at most 16 seconds per node;
+requests to the subscription endpoint never run probes. No system DNS, system proxy,
+or alternate proxy node is used. Probes generate small HTTPS requests to these sites.
+
+The original stored tag remains unchanged. Default and YAML subscriptions use the
+same marker. Clients must refresh the subscription before name-based filtering
+reflects changes; the marker does not disconnect existing sessions or change rules.
+`/health` exposes `autoip_health` (reachable, unreachable, unknown). Results older
+than 15 minutes, changed IP/credentials, missing physical interface and unsupported
+obfuscation are unknown, not evidence of failure. Results are held in memory and
+start unknown after restart. A probe result is a recent sample, not a guarantee
+that every website is reachable. DNS-unavailable nodes remain omitted as before.
+
+AutoIP 按已发布 IP 和原鉴权每 5 分钟串行实测一次，绑定配置中的物理接口；
+通过节点访问上述两个 HTTPS 目标，均失败才加 ` · unreachable`，任一成功
+则恢复原名。单节点最多约 16 秒，订阅请求不等待探测。原始配置名称不变，默认
+订阅和 YAML 一致。QX 刷新订阅后可按该固定字符串过滤。未检测、结果超过
+15 分钟、IP/鉴权变化、缺少物理接口或不支持的混淆配置均为 unknown，不标失败。
+检测不使用系统代理、系统 DNS 或其他节点；会向上述网站产生少量 HTTPS 请求。
+
+Unavailable name example: `Relay-US1 · AutoIP · unreachable`. The marker follows AutoIP; healthy node names retain their existing format.
+不可用名称示例：`Relay-US1 · AutoIP · unreachable`；恢复后沿用原有正常名称格式。

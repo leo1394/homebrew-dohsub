@@ -8,8 +8,11 @@ use crate::{Result, fail};
 pub struct Node { pub host: String, pub port: u16, pub options: Vec<(String, String)>, #[serde(default)] pub relay: Option<Value> }
 impl Node {
     pub fn tag(&self) -> &str { self.options.iter().find(|(k,_)| k == "tag").map(|(_,v)|v.as_str()).unwrap_or("") }
+    fn subscription_tag(&self)->String {
+        if self.relay.is_some() || self.tag().ends_with(" · AutoIP · unreachable") {self.tag().to_string()} else {format!("{} · AutoIP",self.tag())}
+    }
     pub fn render(&self, address: &str) -> String {
-        let opts = self.options.iter().map(|(k,v)| format!("{}={}", k, if k == "tag" && self.relay.is_none() { format!("{} · AutoIP", v) } else { v.clone() })).collect::<Vec<_>>().join(", ");
+        let opts = self.options.iter().map(|(k,v)| format!("{}={}", k, if k == "tag" && self.relay.is_none() { self.subscription_tag() } else { v.clone() })).collect::<Vec<_>>().join(", ");
         format!("{}={}:{}, {}", if self.relay.is_some() {"socks5"} else {"shadowsocks"}, address, self.port, opts)
     }
 }
@@ -19,7 +22,7 @@ pub fn render_yaml(nodes: &[(&Node,String)]) -> Result<String> {
     for (node,address) in nodes {
         let option=|key:&str|node.options.iter().find(|(k,_)|k==key).map(|(_,v)|v.as_str());
         let relay=node.relay.is_some();
-        let name=if relay {node.tag().to_string()} else {format!("{} · AutoIP",node.tag())};
+        let name=node.subscription_tag();
         if !names.insert(name.clone()) {return Err(fail("YAML requires unique node names"));}
         let mut value=serde_json::json!({"name":name,"type":if relay {"socks5"} else {"ss"},"server":address,"port":node.port,"udp":false});
         for (key,text) in &node.options {

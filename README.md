@@ -350,3 +350,5 @@ Unsupported options or duplicate output names return HTTP 422 rather than silent
 changing a node. Unknown, empty or repeated query parameters return HTTP 400.
 No available nodes returns HTTP 503 for either format. Relay clients must run on
 the same host. The output contains node credentials; keep the subscription token private.
+
+AutoIP subscriptions mark confirmed HTTPS probe failures with ` · unreachable` for client name filtering; refresh the subscription to observe recovery. See [probe behavior](docs/resilience.md#autoip-availability-markers--autoip-可用性标记).
