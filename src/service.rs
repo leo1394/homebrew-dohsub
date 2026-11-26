@@ -132,7 +132,7 @@ fn available(state: &State) -> Vec<(&Node,String)> {
 fn health(state: &State) -> Value {
     let nodes=available(state); let count=nodes.len();
     let relays=state.relays.lock().unwrap().clone();
-    let relay_failed=relays.values().any(|r|r.dns_expires<=store::now() || matches!(r.upstream.as_str(),"dns_failed"|"interface_failed"|"tcp_failed"|"handshake_failed"|"io_failed"|"engine_exited"));
+    let relay_failed=relays.values().any(|r|r.dns_expires<=store::now() || r.recovery_state!="ready" || matches!(r.upstream.as_str(),"dns_failed"|"interface_failed"|"tcp_failed"|"handshake_failed"|"io_failed"|"engine_exited"));
     let status=if state.runtime.nodes.is_empty() {"awaiting_import"} else if count==0 {"unavailable"} else if count<state.runtime.nodes.len() || relay_failed {"partial"} else {"ready"};
     json!({"pid":std::process::id(),"port":state.runtime.config.port,"status":status,"node_count":state.runtime.nodes.len(),"published_node_count":count,"subscription_fetches":state.fetches,"relay_health":relays,
         "nodes":state.runtime.nodes.iter().map(|n|json!({"tag":n.tag(),"host":n.host,"port":n.port,"published":nodes.iter().any(|(p,_)|p.tag()==n.tag())})).collect::<Vec<_>>(),
@@ -228,7 +228,7 @@ pub unsafe fn serve(dir: &Path, fd: RawFd, lockfd: RawFd) -> Result<()> {
     serve_owned(dir,listener,_lock,runtime)
 }
 fn serve_owned(dir: &Path, listener: TcpListener, _lock: Lock, runtime: Runtime) -> Result<()> {
-    eprintln!("dohsub service starting; pid={}",std::process::id());
+    eprintln!("time={} dohsub service starting; pid={}",store::now(),std::process::id());
     let _relays=crate::relay::Engines::start(&runtime.nodes,&runtime.config)?;
     let mut saved:Saved=store::load(&dir.join("dns-cache.json"))?;
     if saved.doh!=runtime.config.doh {saved=Saved {doh:runtime.config.doh.clone(),..Default::default()};}
@@ -253,7 +253,7 @@ fn serve_owned(dir: &Path, listener: TcpListener, _lock: Lock, runtime: Runtime)
             let mut s=shared.0.lock().unwrap();
             match op {
                 Request::Status=>Ok(health(&s)),
-                Request::Stop=>{stopped.store(true,Ordering::Relaxed);shared.1.notify_all();Ok(json!({"stopped":true}))},
+                Request::Stop=>{eprintln!("time={} dohsub stop requested via control socket; pid={}",store::now(),std::process::id());stopped.store(true,Ordering::Relaxed);shared.1.notify_all();Ok(json!({"stopped":true}))},
                 Request::Reload|Request::Refresh=>{
                     let nodes:Vec<Node>=store::load(&dir.join("nodes.json"))?;
                     if nodes.iter().filter(|n|n.relay.is_some()).collect::<Vec<_>>()!=s.runtime.nodes.iter().filter(|n|n.relay.is_some()).collect::<Vec<_>>() {return Err(fail("Relay changes require a restart"));}
@@ -276,7 +276,7 @@ fn serve_owned(dir: &Path, listener: TcpListener, _lock: Lock, runtime: Runtime)
     }
     stopped.store(true,Ordering::Relaxed);shared.1.notify_all();server.unblock();
     let _=http.join();let _=worker.join();let _=fs::remove_file(socket_path);
-    eprintln!("dohsub service stopped normally; pid={}",std::process::id());
+    eprintln!("time={} dohsub service stopped normally; pid={}",store::now(),std::process::id());
     Ok(())
 }
 pub fn stop(dir: &Path)->Result<()> {

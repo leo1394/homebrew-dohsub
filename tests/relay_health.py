@@ -22,7 +22,7 @@ def main():
         state = root/'state'; state.mkdir(mode=0o700)
         with socket.socket() as sock:
             sock.bind(('127.0.0.1',0)); port = sock.getsockname()[1]
-        write(state/'config.json', json.dumps({'doh':'https://8.8.8.8/dns-query','port':port,'interface':'en0'}))
+        write(state/'config.json', json.dumps({'doh':'https://8.8.8.8/dns-query','port':port,'interface':'dohsub-no-such-interface'}))
         key = base64.b64encode(bytes(16)).decode()
         write(root/'node.json',json.dumps([{'id':51,'protocol':'papaya','host':'fixture.example','port':443,'alias':'Health-Test','auth':{'server_key':key,'user_key':key}}]))
         flag = root/'fail'; flag.touch()
@@ -68,12 +68,32 @@ def main():
             ready=wait(lambda v:v['published_node_count']==1)
             relay=next(iter(ready['relay_health'].values()))
             assert relay['upstream']=='unverified' and relay['last_success']==0
+            assert relay['recovery_state']=='ready' and relay['tcp_retry_at']==0
+            assert relay['dns_revision']>=1
             with local_http.open(url,timeout=2) as response:
                 assert response.headers['Content-Type']=='application/yaml; charset=utf-8'
                 payload=response.read().decode()
             node=json.loads(payload.splitlines()[1].strip()[2:])
             assert node['type']=='socks5' and node['server']=='127.0.0.1' and node['udp'] is False
             assert 'auth' not in node and 'server_key' not in payload
+            def rejected_request():
+                with socket.create_connection(('127.0.0.1',node['port']),timeout=2) as sock:
+                    def receive(n):
+                        value=b''
+                        while len(value)<n:
+                            part=sock.recv(n-len(value));assert part;value+=part
+                        return value
+                    sock.sendall(b'\x05\x01\x02');assert receive(2)==b'\x05\x02'
+                    user=node['username'].encode();password=node['password'].encode()
+                    sock.sendall(bytes([1,len(user)])+user+bytes([len(password)])+password)
+                    assert receive(2)==b'\x01\x00'
+                    sock.sendall(b'\x05\x01\x00\x01\x08\x08\x08\x08\x01\xbb')
+                    assert receive(10)[1]==4
+            for _ in range(10):rejected_request()
+            wait(lambda v:next(iter(v['relay_health'].values()))['recovery_state']=='cooldown')
+            recovery=next(iter(status()['relay_health'].values()))
+            assert recovery['consecutive_failures']==3 and recovery['tcp_retry_at']>0
+            assert recovery['failures']['interface_failed']==3, 'Requests bypassed recovery gate'
             initial=relay['dns_expires']
             wait(lambda v:next(iter(v['relay_health'].values()))['dns_expires']>initial,10)
             flag.touch()
@@ -83,6 +103,14 @@ def main():
             wait(lambda v:v['published_node_count']==1,15)
             command('stop');process.wait(timeout=15)
             assert process.returncode==0
+            diagnostic=state/'relay-diagnostics.jsonl'
+            rows=[json.loads(line) for line in diagnostic.read_text().splitlines()]
+            assert diagnostic.stat().st_mode & 0o777 == 0o600
+            assert any(row['health']['dns_state']=='retrying' for row in rows)
+            assert any(row['health']['dns_revision']>=1 for row in rows)
+            assert any(row['health']['recovery_state']=='cooldown' for row in rows)
+            assert all(row['pid']==process.pid and row['time']>0 for row in rows)
+            assert token not in diagnostic.read_text() and key not in diagnostic.read_text()
             print('Relay health: cold outage visible, automatic recovery, proactive TTL refresh, expired DNS withheld, graceful stop passed')
         finally:
             if process.poll() is None:

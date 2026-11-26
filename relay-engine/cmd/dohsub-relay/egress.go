@@ -8,6 +8,8 @@ import (
  "strconv"
  "strings"
  "sync"
+ "sort"
+ "syscall"
  "time"
 )
 type dnsCache struct {
@@ -16,11 +18,12 @@ type dnsCache struct {
  expires,refreshAt,nextAttempt time.Time
  refreshing chan struct{}
  failures int
+ revision uint64
  lookup func(config)([]string,time.Duration,error)
  now func()time.Time
  report func(dnsStatus)
 }
-type dnsStatus struct {Event string `json:"event"`;Expires int64 `json:"dns_expires"`;State string `json:"dns_state"`;RetryAt int64 `json:"retry_at"`}
+type dnsStatus struct {Event string `json:"event"`;Expires int64 `json:"dns_expires"`;State string `json:"dns_state"`;RetryAt int64 `json:"retry_at"`;Revision uint64 `json:"dns_revision"`}
 func newDNSCache(lookup func(config)([]string,time.Duration,error))*dnsCache{return &dnsCache{lookup:lookup,now:time.Now}}
 var upstreamCache=newDNSCache(lookupUpstream)
 func validPublicV4(value string) bool {
@@ -42,7 +45,7 @@ func(c *dnsCache)statusLocked()dnsStatus{
  if c.now().Before(c.expires){state="ready"}
  if c.refreshing!=nil{state="refreshing"}else if c.failures>0{state="retrying"}
  expires,retry:=int64(0),int64(0);if !c.expires.IsZero(){expires=c.expires.Unix()};if !c.nextAttempt.IsZero(){retry=c.nextAttempt.Unix()}
- return dnsStatus{Event:"dns",Expires:expires,State:state,RetryAt:retry}
+ return dnsStatus{Event:"dns",Expires:expires,State:state,RetryAt:retry,Revision:c.revision}
 }
 func(c *dnsCache)publish(){if c.report!=nil{c.Lock();value:=c.statusLocked();c.Unlock();c.report(value)}}
 func(c *dnsCache)cachedLocked()([]string,error){
@@ -63,6 +66,7 @@ func(c *dnsCache)refresh(cfg config)([]string,error){
  ips,ttl,err:=c.lookup(cfg)
  c.Lock();now:=c.now()
  if err==nil{
+  previous,current:=append([]string{},c.ips...),append([]string{},ips...);sort.Strings(previous);sort.Strings(current);if strings.Join(previous,",")!=strings.Join(current,","){c.revision++}
   c.ips=append([]string{},ips...);c.expires=now.Add(ttl)
   c.refreshAt=now.Add(ttl*time.Duration(70+cfg.ListenPort%16)/100)
   c.nextAttempt=time.Time{};c.failures=0
@@ -82,15 +86,42 @@ func(c *dnsCache)run(cfg config,stop <-chan struct{}){
  }
 }
 func resolveUpstream(cfg config)([]string,error){return upstreamCache.resolve(cfg)}
+func(c *dnsCache)recover(cfg config){
+ c.Lock();c.refreshAt=c.nextAttempt;c.Unlock()
+ // refresh still honors nextAttempt and shares any in-flight lookup.
+ c.refresh(cfg)
+}
 func dialUpstream(cfg config)(net.Conn,error){
+ return upstreamRecovery.dial(func()(net.Conn,error){return dialPhysicalUpstream(cfg)},func(){upstreamCache.recover(cfg)})
+}
+func dialPhysicalUpstream(cfg config)(net.Conn,error){
  iface,err:=net.InterfaceByName(cfg.Interface)
  if err!=nil || iface.Flags&net.FlagUp==0 || iface.Flags&net.FlagLoopback!=0 || strings.HasPrefix(cfg.Interface,"utun") || strings.HasPrefix(cfg.Interface,"tun"){emitUpstream("interface_failed");return nil,errors.New("physical egress unavailable")}
  ips,err:=resolveUpstream(cfg);if err!=nil{emitUpstream("dns_failed");return nil,err}
  dialer:=net.Dialer{Timeout:10*time.Second,Control:boundControl(iface.Index,cfg.Interface)}
  ctx,cancel:=context.WithTimeout(context.Background(),10*time.Second);defer cancel()
- for _,ip:=range ips {
-  conn,e:=dialer.DialContext(ctx,"tcp4",net.JoinHostPort(ip,strconv.Itoa(cfg.Node.Port)));if e==nil{emitUpstream("tcp_connected");return conn,nil}
- }
- emitUpstream("tcp_failed")
+ conn,last:=dialAddresses(ctx,ips,cfg.Node.Port,dialer.DialContext)
+ if last==nil{emitUpstream("tcp_connected");return conn,nil}
+ emit(struct{Event string `json:"event"`;State string `json:"upstream"`;Error string `json:"error_kind"`}{"upstream","tcp_failed",dialErrorKind(last)})
  return nil,errors.New("physical upstream connection failed; no route fallback")
+}
+func dialAddresses(ctx context.Context,ips []string,port int,dial func(context.Context,string,string)(net.Conn,error))(net.Conn,error){
+ var last error
+ for i,ip:=range ips {
+  // Give every DNS answer a share of the total budget instead of allowing
+  // a blackholed first address to consume the whole deadline.
+  deadline,_:=ctx.Deadline();remaining:=time.Until(deadline);if remaining<=0{last=context.DeadlineExceeded;break}
+  addressCtx,stop:=context.WithTimeout(ctx,remaining/time.Duration(len(ips)-i))
+  conn,e:=dial(addressCtx,"tcp4",net.JoinHostPort(ip,strconv.Itoa(port)));stop();if e==nil{return conn,nil};last=e
+ }
+ if last==nil{last=errors.New("no upstream address")};return nil,last
+}
+func dialErrorKind(err error)string{
+ var timeout net.Error
+ if errors.As(err,&timeout) && timeout.Timeout(){return "timeout"}
+ if errors.Is(err,syscall.ECONNREFUSED){return "refused"}
+ if errors.Is(err,syscall.ENETUNREACH) || errors.Is(err,syscall.EHOSTUNREACH){return "unreachable"}
+ if errors.Is(err,syscall.EADDRNOTAVAIL){return "address_unavailable"}
+ if errors.Is(err,syscall.EMFILE) || errors.Is(err,syscall.ENFILE) || errors.Is(err,syscall.ENOBUFS){return "resource_exhausted"}
+ return "other"
 }

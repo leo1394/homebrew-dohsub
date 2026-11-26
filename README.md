@@ -327,7 +327,7 @@ two keys alone does not provide protocol interoperability.
 
 ### Relay DNS recovery
 
-Relays retry transient DoH transport failures within a 10-second budget, refresh DNS before TTL expiry, and back off after failures. Valid cached addresses remain usable during refresh; expired, private and fake IP addresses are refused. `dohsub status` reports DNS validity and the last upstream connection outcome separately. A listening port alone does not make a relay publishable. See [DNS recovery and relay health](docs/resilience.md).
+Relays retry transient DoH transport failures within a 10-second budget, refresh DNS before TTL expiry, and back off after failures. Valid cached addresses remain usable during refresh; expired, private and fake IP addresses are refused. `dohsub status` reports DNS validity and the last upstream connection outcome separately. A listening port alone does not make a relay publishable. Connection failures use per-node cooldowns (2s through 1h), then stop automatic recovery after the final failed attempt. Bounded private diagnostic logs survive restarts. See [DNS recovery and relay health](docs/resilience.md).
 
 Relay capacity can be set with `relay_max_connections` in the private `config.json`
 (default 256 per node, range 16–4096; restart required). Existing configurations

@@ -50,3 +50,58 @@ verified，仅 TCP 连接成功记录 tcp_connected。状态属于已观察到�
 DNS 仍有效且本地监听可达才发布中继。上游错误单独报告，整体健康状态标为
 partial，但不删除节点、不更改监听鉴权；后续成功会更新状态。没有可发布节点
 时订阅返回 503，让客户端保留上次订阅。QX 原有分流规则保持不变。
+
+## Connection recovery / 建连恢复
+
+Each relay allows at most 16 concurrent upstream dial operations (established
+sessions retain the separate configured connection limit). Three consecutive
+failed dial operations open a per-node circuit breaker. Further requests fail
+quickly instead of queuing, spawning retry workers or repeatedly dialing.
+The delay sequence is **2s, 5s, 15s, 45s, 60s, 2m, 5m, 15m, 30m, 45m, 1h**.
+After each delay the next request performs one recovery attempt; concurrent
+requests do not duplicate it. There are no idle/background TCP probes. Failure
+of the final attempt sets `exhausted` and stops automatic connection recovery
+until `dohsub restart`. A successful TCP dial resets the sequence; this does not
+claim that the protocol or a particular destination is healthy.
+
+A recovery attempt requests fresh DoH data while respecting resolver single-flight
+and DNS failure backoff. Valid cached data may still be used if refresh fails;
+expired data is never used. Multiple returned addresses share the 10-second TCP
+budget, so one unreachable address cannot consume the entire budget. Existing
+connections, node selection, credentials and traffic rules remain unchanged.
+Routine TTL-based DNS maintenance remains independent of TCP recovery, including
+when the TCP circuit is exhausted. Neither handshake errors nor destination I/O
+errors trigger this node-wide TCP circuit breaker.
+
+`relay_health` adds `recovery_state` (`ready`, `cooldown`, `probing`, `exhausted`),
+`tcp_retry_at`, `consecutive_failures`, `suppressed`, `error_kind` and `dns_revision`.
+`suppressed` is cumulative and published on recovery transitions and at most once per 30 seconds of suppressed traffic. `dns_revision`
+changes when the DNS address set changes, without exposing addresses.
+`error_kind` describes the most recent classified TCP failure (timeout, refused,
+unreachable, address_unavailable, resource_exhausted or other).
+
+Validated health snapshots are saved to `~/.dohsub/relay-diagnostics.jsonl`
+(or `$DOHSUB_HOME/relay-diagnostics.jsonl`), mode 600, with Unix timestamps,
+daemon PID and local relay port. Recovery transitions, DNS address changes,
+DNS retry changes, first failure and helper exits are recorded; ordinary traffic
+is summarized at most once per 30 seconds per relay. Rotation retains the current
+file and one previous `.1` file, at most 1 MiB each. No credentials, raw helper
+errors, upstream addresses or private DoH URLs are logged. Service lifecycle
+messages in `service.log` also include timestamps and explicit stop requests.
+
+每个中继最多同时进行 16 次上游建连，已建立会话仍使用独立的连接容量配置。
+连续 3 次建连失败后进入该节点的冷却期，新请求快速失败，不排队、不创建重试
+任务。间隔依次为 **2 秒、5 秒、15 秒、45 秒、60 秒、2 分钟、5 分钟、15 分钟、
+30 分钟、45 分钟、1 小时**。每次到期后由下一条请求触发唯一一次恢复尝试；
+最后一次仍失败则进入 exhausted，停止自动建连恢复，直到手动执行
+`dohsub restart`。建连成功重置序列，但不等同于协议解密或目标网站访问成功。
+
+恢复尝试会请求刷新 DoH，仍遵守解析合并及 DNS 失败退避。多地址共享 10 秒
+TCP 预算，避免首个地址耗尽全部时间。不会切换节点、改变既有连接或分流规则。
+常规 TTL DNS 维护独立运行，exhausted 只停止自动建连恢复；协议握手和目标网站
+读写失败不会触发整个节点的 TCP 熔断。
+
+健康接口增加恢复状态、下次建连时间、连续失败数、被抑制次数、错误分类和
+DNS 地址集版本。被抑制次数在恢复状态变化时汇总发布，持续拒绝请求时最多每 30 秒更新一次。诊断日志使用时间戳、
+进程号和本地监听端口关联，按上述规则记录并轮转，最多保留 2 MiB，不包含密钥、
+上游地址或私有 DoH URL。重启后的历史记录仍可用于追查故障。

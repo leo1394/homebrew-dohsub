@@ -11,7 +11,7 @@ use store::{Config, Lock};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 fn fail(message: impl Into<String>) -> Box<dyn std::error::Error + Send + Sync> { Box::new(io::Error::other(message.into())) }
 const VERSION: &str = env!("CARGO_PKG_VERSION");
-const RELEASE_DATE: &str = "2026-11-25";
+const RELEASE_DATE: &str = "2026-11-26";
 const REPOSITORY: &str = env!("CARGO_PKG_REPOSITORY");
 fn version_text() -> String { format!("dohsub version {} ({})\n{}\n",VERSION,RELEASE_DATE,REPOSITORY) }
 
