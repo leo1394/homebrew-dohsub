@@ -352,3 +352,5 @@ No available nodes returns HTTP 503 for either format. Relay clients must run on
 the same host. The output contains node credentials; keep the subscription token private.
 
 AutoIP subscriptions mark confirmed HTTPS probe failures with ` · unreachable` for client name filtering; refresh the subscription to observe recovery. See [probe behavior](docs/resilience.md#autoip-availability-markers--autoip-可用性标记).
+
+When a newer release is available, `dohsub upgrade` asks for confirmation. Enter `y` or `yes` to upgrade; noninteractive use requires `-y` or `--yes`. Homebrew installations remain managed by Homebrew. A manually copied `PREFIX/bin/dohsub` can be upgraded in place and initialized as a standalone installation: the system/architecture selects the binary, and binary/installer checksums are verified before installation. Ambiguous layouts and system `/usr/bin` installations receive a platform-specific manual command instead. Existing node configuration is preserved; upgrading the executable does not restart a running service.

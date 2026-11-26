@@ -63,8 +63,8 @@ enum Action {
     Restore,
     #[command(about="Print exactly two lines: version and repository URL")]
     Version,
-    #[command(about="Check GitHub releases and optionally upgrade the owning installation", after_help="Example: dohsub upgrade\nNetwork is required. Stable releases only. Confirmation defaults to no; non-interactive updates require --yes. Homebrew uses its own updater; standalone installations require the install.sh ownership marker. Missing or invalid release metadata reports a failed check, not 'latest'.")]
-    Upgrade { #[arg(short, long)] yes: bool },
+    #[command(about="Check GitHub releases and optionally upgrade the owning installation", after_help="Examples: dohsub upgrade; dohsub upgrade -y; dohsub upgrade --yes\nNetwork is required. Stable releases only. Confirmation defaults to no; non-interactive updates require --yes. Homebrew uses its own updater; standalone installations use install.sh; manually copied PREFIX/bin/dohsub installations can be adopted in place. Missing or invalid release metadata reports a failed check, not 'latest'.")]
+    Upgrade { #[arg(short, long, help="Skip confirmation and install a newer stable version if available")] yes: bool },
     #[command(about="Generate shell completion without reading or writing configuration", after_help="Examples:\n  dohsub completion zsh > _dohsub\n  dohsub completion bash > dohsub.bash\n  dohsub completion fish > dohsub.fish")]
     Completion { shell: clap_complete::Shell },
     #[command(about="Write the man page to stdout without initializing state")]
